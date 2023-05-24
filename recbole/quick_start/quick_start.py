@@ -65,9 +65,7 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
     best_valid_score, best_valid_result = trainer.fit(
         train_data, valid_data, saved=saved, show_progress=config['show_progress']
     )
-    wandb.log({'best_valid_score' : best_valid_score,
-               'best_valid_result': best_valid_result,
-               'similarity_thres' : trainer.sim_thres})
+
 
     import numpy as np
     import seaborn as sns
@@ -121,6 +119,12 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
 
     logger.info(set_color('best valid ', 'yellow') + f': {best_valid_result}')
     logger.info(set_color('test result', 'yellow') + f': {test_result}')
+    
+    wandb.log({'best_valid_score' : best_valid_score,
+               'valid_score_bigger': config['valid_metric_bigger'],
+               'best_valid_result': best_valid_result,
+                'similarity_thres' : trainer.sim_thres,
+                'test_result' : test_result})
 
     return {
         'best_valid_score': best_valid_score,
@@ -128,6 +132,7 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
         'best_valid_result': best_valid_result,
         'test_result': test_result
     }
+
 
 
 def objective_function(config_dict=None, config_file_list=None, saved=True):

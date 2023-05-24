@@ -27,6 +27,8 @@ import torch.optim as optim
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from tqdm import tqdm
 
+import wandb
+
 from recbole.data.interaction import Interaction
 from recbole.evaluator import ProxyEvaluator
 from recbole.utils import ensure_dir, get_local_time, early_stopping, calculate_valid_score, dict2str, \
@@ -315,6 +317,9 @@ class Trainer(AbstractTrainer):
                     max_step=self.stopping_step,
                     bigger=self.valid_metric_bigger
                 )
+                wandb.log({'loss':train_loss,
+                           'valid_score' : valid_score,
+                           'similarity_thres' : self.sim_thres})
                 valid_end_time = time()
                 valid_score_output = (set_color("epoch %d evaluating", 'green') + " [" + set_color("time", 'blue')
                                     + ": %.2fs, " + set_color("valid_score", 'blue') + ": %f]") % \
@@ -343,6 +348,8 @@ class Trainer(AbstractTrainer):
         if self.draw_loss_pic:
             save_path = '{}-{}-train_loss.pdf'.format(self.config['model'], get_local_time())
             self.plot_train_loss(save_path=os.path.join(save_path))
+            
+        
         # import pandas as pd
         # data = pd.DataFrame({'align': self.align, 'uniform': self.uni})
         # data.to_csv(
