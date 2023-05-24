@@ -194,7 +194,7 @@ class CL4SRec(SequentialRecommender):
         output = self.gather_indexes(output, item_seq_len - 1)
         return output  # [B H]
 
-    def calculate_loss(self, interaction):
+    def calculate_loss(self, interaction, sim_thres):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         seq_output = self.forward(item_seq, item_seq_len)
@@ -229,7 +229,7 @@ class CL4SRec(SequentialRecommender):
         
         nce_loss = self.nce_fct(nce_logits, nce_labels)
         
-        return loss + self.lmd * nce_loss, alignment, uniformity
+        return loss + self.lmd * nce_loss, None #, alignment, uniformity
 
     def decompose(self, z_i, z_j, origin_z, batch_size):
         """
