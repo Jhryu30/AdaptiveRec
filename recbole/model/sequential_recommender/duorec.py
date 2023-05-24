@@ -218,7 +218,7 @@ class DuoRec(SequentialRecommender):
             #     alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
             #                                            batch_size=item_seq_len.shape[0])
 
-        return loss, None
+        return loss, sim_thres
 
     def mask_correlated_samples(self, batch_size):
         N = 2 * batch_size
