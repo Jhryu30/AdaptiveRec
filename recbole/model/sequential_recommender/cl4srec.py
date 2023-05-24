@@ -229,7 +229,7 @@ class CL4SRec(SequentialRecommender):
         
         nce_loss = self.nce_fct(nce_logits, nce_labels)
         
-        return loss + self.lmd * nce_loss, sim_thres #, alignment, uniformity
+        return loss + self.lmd * nce_loss, torch.tensor([sim_thres]) #, alignment, uniformity
 
     def decompose(self, z_i, z_j, origin_z, batch_size):
         """
