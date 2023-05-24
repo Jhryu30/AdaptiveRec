@@ -153,7 +153,7 @@ class DuoRec(SequentialRecommender):
         output = self.gather_indexes(output, item_seq_len - 1)
         return output  # [B H]
 
-    def calculate_loss(self, interaction):
+    def calculate_loss(self, interaction, sim_thres):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         seq_output = self.forward(item_seq, item_seq_len)
@@ -218,7 +218,7 @@ class DuoRec(SequentialRecommender):
             #     alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
             #                                            batch_size=item_seq_len.shape[0])
 
-        return loss
+        return loss, torch.tensor([sim_thres])
 
     def mask_correlated_samples(self, batch_size):
         N = 2 * batch_size
