@@ -38,7 +38,7 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
             config=config) #, mode='disabled')
     # init_seed(config['seed'], config['reproducibility'])
 
-    
+    breakpoint()
     # logger initialization
     init_logger(config)
     logger = getLogger()
@@ -119,6 +119,7 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
     plt.savefig(log_dir + '/svs.pdf', format='pdf', transparent=False, bbox_inches='tight')
 
     # model evaluation
+    print(config['eval_setting'])
     test_result = trainer.evaluate(test_data, load_best_model=saved, show_progress=config['show_progress'])
 
     logger.info(set_color('best valid ', 'yellow') + f': {best_valid_result}')
@@ -129,13 +130,50 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
                'best_valid_result': best_valid_result,
                 'similarity_thres' : trainer.sim_thres,
                 'test_result' : test_result})
+    
+    
+    
+    # random setting (uni100)
+    if config['eval_uniform_setting'] == True:
+        config['eval_setting'] = 'TO_LS,uni100' 
+        dataset = create_dataset(config)
+        train_data, valid_data, test_data = data_preparation(config, dataset)
+        
+        model = get_model(config['model'])(config, train_data).to(config['device'])
+        trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
+        trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
+        
+        print(config['eval_setting'])
+        test_random_result = trainer.evaluate(test_data, load_best_model=saved, show_progress=config['show_progress'])
+        
+        logger.info(set_color('test random result', 'yellow') + f': {test_random_result}')
+        wandb.log({'test_random_result':test_random_result})
+
+
+
+    # popular setting (pop100)
+    if config['eval_popular_setting'] == True:
+        config['eval_setting'] = 'TO_LS,pop100' 
+        dataset = create_dataset(config)
+        train_data, valid_data, test_data = data_preparation(config, dataset)
+        
+        model = get_model(config['model'])(config, train_data).to(config['device'])
+        trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
+        trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
+        
+        print(config['eval_setting'])
+        test_popular_result = trainer.evaluate(test_data, load_best_model=saved, show_progress=config['show_progress'])
+        
+        logger.info(set_color('test popular result', 'yellow') + f': {test_popular_result}')
+        wandb.log({'test_popular_result':test_popular_result})
+        
 
     return {
         'best_valid_score': best_valid_score,
         'valid_score_bigger': config['valid_metric_bigger'],
         'best_valid_result': best_valid_result,
         'test_result': test_result
-    }, log_dir
+        }
 
 
 

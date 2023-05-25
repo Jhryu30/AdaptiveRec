@@ -18,7 +18,7 @@ import wandb
 
 
 
-def run_recbole_eval(model=None, dataset=None, config_file_list=None, config_dict=None, saved=True, log_dir=None):
+def run_recbole_eval(model=None, dataset=None, config_file_list=None, config_dict=None, saved=True, log_dir=None, logger=None):
     r""" A fast running api, which includes the complete process of
     training and testing a model on a specified dataset
 
@@ -33,9 +33,10 @@ def run_recbole_eval(model=None, dataset=None, config_file_list=None, config_dic
     config = Config(model=model, dataset=dataset, config_file_list=config_file_list, config_dict=config_dict)
     # init_seed(config['seed'], config['reproducibility'])
     
+    breakpoint()
     # # logger initialization
     # init_logger(config)
-    # logger = getLogger()
+    logger = logger
 
     import os
     # log_dir = os.path.dirname(logger.handlers[0].baseFilename)
@@ -69,6 +70,7 @@ def run_recbole_eval(model=None, dataset=None, config_file_list=None, config_dic
     # logger.info(set_color('best valid ', 'yellow') + f': {best_valid_result}')
     # logger.info(set_color('test result', 'yellow') + f': {test_result}')
     
+    breakpoint
     eval_setting = config['eval_setting'].split(',')[1]
     wandb.log({f'test_result_{eval_setting}':test_result})
 
