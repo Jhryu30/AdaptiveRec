@@ -46,6 +46,10 @@ eval_batch_size: 256 #评测的batch_size
 weight_decay: 0
 topk: [5, 10, 20, 50]
 
+# additional evaluation settings
+eval_uniform_setting : True
+eval_popular_setting : True
+
 # directory setting
 log_root: "./log/"
 data_path: "./dataset/"

@@ -27,6 +27,8 @@ import torch.optim as optim
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from tqdm import tqdm
 
+import torch.autograd as autograd
+
 import wandb
 
 from recbole.data.interaction import Interaction
@@ -109,6 +111,7 @@ class Trainer(AbstractTrainer):
         self.tot_item_num = None
         
         self.sim_thres = 0
+        self.saved_fisher_model_file = os.path.join(config['log_dir'], 'fisher_model.pth')
 
     def _build_optimizer(self, params):
         r"""Init the Optimizer
@@ -481,6 +484,54 @@ class Trainer(AbstractTrainer):
             plt.show()
         if save_path:
             plt.savefig(save_path)
+            
+    def compute_fisher(self, eval_data, load_best_model=True, model_file=None, show_progress=False):
+        self.model.eval()
+        
+        if eval_data.dl_type == DataLoaderType.FULL:
+            if self.item_tensor is None:
+                self.item_tensor = eval_data.get_item_feature().to(self.device).repeat(eval_data.step)
+            self.tot_item_num = eval_data.dataset.item_num
+            
+        iter_data = (
+            tqdm(
+                enumerate(eval_data),
+                total=len(eval_data),
+                desc=set_color(f"Evaluate   ", 'pink'),
+            ) if show_progress else enumerate(eval_data)
+        )
+        
+        fisher_matrix = {}
+        for name, param in self.model.named_parameters():
+            fisher_matrix[name] = torch.zeros_like(param.data).detach()
+        
+        for batch_idx, batched_data in iter_data:
+            # if eval_data.dl_type == DataLoaderType.FULL:
+            #     interaction, scores = self._full_sort_batch_eval(batched_data)
+            # else:
+            #     interaction = batched_data
+            #     batch_size = interaction.length
+            #     if batch_size <= self.test_batch_size:
+            #         scores = self.model.predict(interaction.to(self.device))
+            #     else:
+            #         scores = self._spilt_predict(interaction, batch_size)
+
+            # batch_matrix = self.evaluator.collect(interaction, scores)
+            # batch_matrix_list.append(batch_matrix)
+            interaction, history_index, swap_row, swap_col_after, swap_col_before = batched_data
+            log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
+            
+            grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            for (name, param), grad in zip(self.model.named_parameters(), grads):
+                if param.requires_grad:
+                    fisher_matrix[name] += (grad**2).detach()
+                    
+            self.optimizer.zero_grad()
+            
+        
+        return fisher_matrix
+        
+        
 
 
 class KGTrainer(Trainer):
