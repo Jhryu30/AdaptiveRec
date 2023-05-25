@@ -69,6 +69,7 @@ class AdaptiveRec(SequentialRecommender):
         self.LayerNorm = nn.LayerNorm(self.hidden_size, eps=self.layer_norm_eps)
         self.dropout = nn.Dropout(self.hidden_dropout_prob)
 
+
         if self.loss_type == 'BPR':
             self.loss_fct = BPRLoss()
         elif self.loss_type == 'CE':
@@ -79,11 +80,25 @@ class AdaptiveRec(SequentialRecommender):
         self.ssl = config['contrast']
         self.tau = config['tau']
         self.sim = config['sim']
+        self.AST = config['AST']
+        self.MONS = config['MONS']
+        self.k = config['k']
         self.batch_size = config['train_batch_size']
         self.mask_default = self.mask_correlated_samples(batch_size=self.batch_size)
         self.aug_nce_fct = nn.CrossEntropyLoss()
         self.sem_aug_nce_fct = nn.CrossEntropyLoss()
         
+        if self.AST:
+            self.AST_layer = nn.Sequential(
+                        nn.Linear(self.hidden_size,1),
+                        nn.Sigmoid()
+                        )
+            
+        self.sim_log = []
+        self.sim_noDA_log = []
+        self.similarity_log = {}
+        self.similarity_noDA_log = {}
+
         # parameters initialization
         self.apply(self._init_weights)
 
@@ -150,13 +165,27 @@ class AdaptiveRec(SequentialRecommender):
 
         trm_output = self.trm_encoder(input_emb, extended_attention_mask, output_all_encoded_layers=True)
         output = trm_output[-1]
+
+
+        # original output process
         output = self.gather_indexes(output, item_seq_len - 1)
-        return output  # [B H]
+
+        # for AST=adaptive_similarity_threshold
+        if self.AST:
+            AST = self.AST_layer(output)
+            AST = torch.mean(AST)
+            AST = 2.1*(AST - 0.5)   # for make in [-1,1]
+            # print(f'AST={AST}')
+            self.AST_value = AST
+        else:
+            AST = None
+
+        return output, AST      # [B H] , AST
 
     def calculate_loss(self, interaction, sim_thres):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
-        seq_output = self.forward(item_seq, item_seq_len)
+        seq_output, AST = self.forward(item_seq, item_seq_len)
         pos_items = interaction[self.POS_ITEM_ID]
         if self.loss_type == 'BPR':
             neg_items = interaction[self.NEG_ITEM_ID]
@@ -172,10 +201,10 @@ class AdaptiveRec(SequentialRecommender):
         
         # Unsupervised NCE
         if self.ssl in ['us', 'un']:
-            aug_seq_output = self.forward(item_seq, item_seq_len)
+            aug_seq_output, _ = self.forward(item_seq, item_seq_len)
             nce_logits, nce_labels, adaptive_sim_thres = self.info_nce(seq_output, aug_seq_output, sim_thres=sim_thres,
                                                               temp=self.tau, batch_size=item_seq_len.shape[0], 
-                                                              sim=self.sim)
+                                                              sim=self.sim, AST=AST)
             # nce_logits = torch.mm(seq_output, aug_seq_output.T)
             # nce_labels = torch.tensor(list(range(nce_logits.shape[0])), dtype=torch.long, device=item_seq.device)
             
@@ -189,11 +218,11 @@ class AdaptiveRec(SequentialRecommender):
         # Supervised NCE
         if self.ssl in ['us', 'su']:
             sem_aug, sem_aug_lengths = interaction['sem_aug'], interaction['sem_aug_lengths']
-            sem_aug_seq_output = self.forward(sem_aug, sem_aug_lengths)
+            sem_aug_seq_output, _ = self.forward(sem_aug, sem_aug_lengths)
 
             sem_nce_logits, sem_nce_labels, adaptive_sim_thres = self.info_nce(seq_output, sem_aug_seq_output, sim_thres=sim_thres,
                                                                       temp=self.tau,batch_size=item_seq_len.shape[0], 
-                                                                      sim=self.sim)
+                                                                      sim=self.sim, AST=AST)
             
             # sem_nce_logits = torch.mm(seq_output, sem_aug_seq_output.T) / self.tau
             # sem_nce_labels = torch.tensor(list(range(sem_nce_logits.shape[0])), dtype=torch.long, device=item_seq.device)
@@ -205,14 +234,14 @@ class AdaptiveRec(SequentialRecommender):
             loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
         
         if self.ssl == 'us_x':
-            aug_seq_output = self.forward(item_seq, item_seq_len)
+            aug_seq_output, _ = self.forward(item_seq, item_seq_len)
 
             sem_aug, sem_aug_lengths = interaction['sem_aug'], interaction['sem_aug_lengths']
-            sem_aug_seq_output = self.forward(sem_aug, sem_aug_lengths)
+            sem_aug_seq_output, _ = self.forward(sem_aug, sem_aug_lengths)
 
             sem_nce_logits, sem_nce_labels, adaptive_sim_thres = self.info_nce(aug_seq_output, sem_aug_seq_output, sim_thres=sim_thres,
                                                                       temp=self.tau, batch_size=item_seq_len.shape[0], 
-                                                                      sim=self.sim)
+                                                                      sim=self.sim, AST=AST)
 
             loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
             
@@ -221,8 +250,16 @@ class AdaptiveRec(SequentialRecommender):
             #                                            batch_size=item_seq_len.shape[0])
             
 
-        return loss, adaptive_sim_thres
+        return loss + 0.1*torch.norm(AST-0.2, p=2), adaptive_sim_thres
 
+    def ClampMax(self, x, val):
+        """
+        Clamps x to val.
+        val >= 0.0
+        x = feature
+        """
+        return x.clamp(min=0.0).sub(val).clamp(max=0.0).add(val) + x.clamp(max=0.0)
+    
     def mask_correlated_samples(self, batch_size):
         N = 2 * batch_size
         mask = torch.ones((N, N), dtype=bool)
@@ -231,8 +268,9 @@ class AdaptiveRec(SequentialRecommender):
             mask[i, batch_size + i] = 0
             mask[batch_size + i, i] = 0
         return mask
+    
 
-    def info_nce(self, z_i, z_j, sim_thres, temp, batch_size, sim='dot'):
+    def info_nce(self, z_i, z_j, sim_thres, temp, batch_size, sim='dot', AST=None):
         """
         We do not sample negative examples explicitly.
         Instead, given a positive pair, similar to (Chen et al., 2017), we treat the other 2(N − 1) augmented examples within a minibatch as negative examples.
@@ -255,13 +293,29 @@ class AdaptiveRec(SequentialRecommender):
         else:
             mask = self.mask_default
         negative_samples = sim[mask].reshape(N, -1)
+
+        # similarity log
+        similarity = negative_samples.clone().detach().view(-1)
+        similarity_noDA = negative_samples[:batch_size,:batch_size-1].clone().detach().view(-1)
+        self.sim_log.append(similarity)
+        self.sim_noDA_log.append(similarity_noDA)
+
         
         # similarity log
         similarity = negative_samples.view(-1)
         adaptive_sim_thres = similarity.mean()
 
-        if sim_thres != 0:
-            negative_samples[negative_samples>sim_thres] = -1e9
+        # if sim_thres != 0:
+        #     negative_samples[negative_samples>sim_thres] = -1e9
+
+
+        if AST != None:
+            replace_value = -1e9
+            negative_samples = self.ClampMax(negative_samples, AST)
+            # negative_samples[negative_samples>=AST] = replace_value
+            # negative_samples[negative_samples>AST] = -1e9
+            # -torch.nn.Threshold(-thr,-val)(-A)
+            # negative_samples = -torch.nn.Threshold(-AST.item(),-replace_value)(-negative_samples)
 
     
         labels = torch.zeros(N).to(positive_samples.device).long()
@@ -299,7 +353,7 @@ class AdaptiveRec(SequentialRecommender):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         test_item = interaction[self.ITEM_ID]
-        seq_output = self.forward(item_seq, item_seq_len)
+        seq_output, _ = self.forward(item_seq, item_seq_len)
         test_item_emb = self.item_embedding(test_item)
         scores = torch.mul(seq_output, test_item_emb).sum(dim=1)  # [B]
         return scores
@@ -307,7 +361,7 @@ class AdaptiveRec(SequentialRecommender):
     def full_sort_predict(self, interaction):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
-        seq_output = self.forward(item_seq, item_seq_len)
+        seq_output, _ = self.forward(item_seq, item_seq_len)
         test_items_emb = self.item_embedding.weight
         scores = torch.matmul(seq_output, test_items_emb.transpose(0, 1))  # [B n_items]
         return scores

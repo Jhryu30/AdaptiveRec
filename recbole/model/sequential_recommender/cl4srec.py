@@ -85,6 +85,16 @@ class CL4SRec(SequentialRecommender):
         self.mask_default = self.mask_correlated_samples(batch_size=self.batch_size)
         self.nce_fct = nn.CrossEntropyLoss()
 
+        self.AST = config['AST']
+        self.MONS = config['MONS']
+        self.k = config['k']
+        self.AST_value = 0
+
+        self.sim_log = []
+        self.sim_noDA_log = []
+        self.similarity_log = {}
+        self.similarity_noDA_log = {}
+
         # parameters initialization
         self.apply(self._init_weights)
 
@@ -290,6 +300,22 @@ class CL4SRec(SequentialRecommender):
         else:
             mask = self.mask_default
         negative_samples = sim[mask].reshape(N, -1)
+
+        # similarity log
+        similarity = negative_samples.clone().detach().view(-1)
+        similarity_noDA = negative_samples[:batch_size,:batch_size-1].clone().detach().view(-1)
+        self.sim_log.append(similarity)
+        self.sim_noDA_log.append(similarity_noDA)
+
+        if self.MONS == 'upper' :
+            k = int(batch_size * self.k)
+            negative_samples, _ = torch.sort(negative_samples, descending=False)
+            negative_samples = negative_samples[:, 2*k:]
+        elif self.MONS == 'lower' :
+            k = int(batch_size * self.k)
+            negative_samples, _ = torch.sort(negative_samples, descending=False)
+            negative_samples = negative_samples[:, :2*k]
+
     
         labels = torch.zeros(N).to(positive_samples.device).long()
         logits = torch.cat((positive_samples, negative_samples), dim=1)

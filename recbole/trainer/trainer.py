@@ -18,14 +18,17 @@ recbole.trainer.trainer
 """
 
 import os
+import gc
 from logging import getLogger
 from time import time
 
 import numpy as np
 import torch
+import pickle
 import torch.optim as optim
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from tqdm import tqdm
+from timm.scheduler.cosine_lr import CosineLRScheduler
 
 import torch.autograd as autograd
 
@@ -91,7 +94,8 @@ class Trainer(AbstractTrainer):
         self.valid_metric = config['valid_metric'].lower()
         self.valid_metric_bigger = config['valid_metric_bigger']
         self.test_batch_size = config['eval_batch_size']
-        self.device = config['device']
+        # self.device = config['device']
+        self.device = torch.device('cuda:'+str(config['gpu_id']))
         self.checkpoint_dir = config['checkpoint_dir']
         ensure_dir(self.checkpoint_dir)
         saved_model_file = '{}-{}.pth'.format(self.config['model'], get_local_time())
@@ -105,6 +109,7 @@ class Trainer(AbstractTrainer):
         self.best_valid_result = None
         self.train_loss_dict = dict()
         self.optimizer = self._build_optimizer(self.model.parameters())
+
         self.eval_type = config['eval_type']
         self.evaluator = ProxyEvaluator(config)
         self.item_tensor = None
@@ -112,6 +117,21 @@ class Trainer(AbstractTrainer):
         
         self.sim_thres = 0
         self.saved_fisher_model_file = os.path.join(config['log_dir'], 'fisher_model.pth')
+        self.saved_similarity_file = os.path.join(config['log_dir'], 'similarity_epoch{}.pickle')
+        self.saved_similarity_noDA_file = os.path.join(config['log_dir'], 'similarity_noDA_epoch{}.pickle')
+        self.cosine_lr_scheduler = config['cosine_lr_scheduler']
+        self.AST = config['AST']
+        self.MONS = config['MONS']
+        self.k = config['k']
+        if self.cosine_lr_scheduler :
+            self.lr_scheduler = CosineLRScheduler(self.optimizer,
+                                                t_initial=self.epochs,
+                                                lr_min=self.learning_rate*0.1,
+                                                warmup_lr_init=self.learning_rate*0.1,
+                                                warmup_t=int(self.epochs*0.05),
+                                                cycle_limit=1,
+                                                t_in_epochs=False)
+        self.model = self.model.to(self.device)
 
     def _build_optimizer(self, params):
         r"""Init the Optimizer
@@ -157,6 +177,10 @@ class Trainer(AbstractTrainer):
             multiple parts and the model return these multiple parts loss instead of the sum of loss, it will return a
             tuple which includes the sum of loss in each part.
         """
+        self.model.sim_log = []
+        self.model.sim_noDA_log = []
+        sim_thres_epoch = []
+
         self.model.train()
         loss_func = loss_func or self.model.calculate_loss
         total_loss = None
@@ -169,7 +193,6 @@ class Trainer(AbstractTrainer):
         )
         # ave_align = []
         # ave_uni = []
-        sim_thres_epoch = []
         for batch_idx, interaction in iter_data:
             interaction = interaction.to(self.device)
             self.optimizer.zero_grad()
@@ -191,9 +214,31 @@ class Trainer(AbstractTrainer):
             if self.clip_grad_norm:
                 clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
             self.optimizer.step()
+            if self.cosine_lr_scheduler :
+                self.lr_scheduler.step_update(epoch_idx)
+                # print(self.optimizer.param_groups[0]['lr'])/
+
         # self.align.append(np.mean(ave_align))
         # self.uni.append(np.mean(ave_uni))
         self.sim_thres = np.mean(sim_thres_epoch)
+
+        # save similarity
+        self.model.similarity_log = {}
+        self.model.similarity_log.update({epoch_idx : self.model.sim_log})
+        with open(self.saved_similarity_file.format(epoch_idx), 'wb') as f:
+                pickle.dump(self.model.similarity_log, f)
+
+        self.model.similarity_noDA_log = {}
+        self.model.similarity_noDA_log.update({epoch_idx : self.model.sim_noDA_log})
+        with open(self.saved_similarity_noDA_file.format(epoch_idx), 'wb') as f:
+                pickle.dump(self.model.similarity_noDA_log, f)
+
+        del self.model.sim_log
+        del self.model.sim_noDA_log
+        del sim_thres_epoch
+        torch.cuda.empty_cache()
+        gc.collect()
+
         return total_loss
 
     def _valid_epoch(self, valid_data, show_progress=False):
@@ -322,7 +367,8 @@ class Trainer(AbstractTrainer):
                 )
                 wandb.log({'loss':train_loss,
                            'valid_score' : valid_score,
-                           'similarity_thres' : self.sim_thres})
+                           'similarity_thres' : self.sim_thres,
+                           'AST' : self.model.AST_value})
                 valid_end_time = time()
                 valid_score_output = (set_color("epoch %d evaluating", 'green') + " [" + set_color("time", 'blue')
                                     + ": %.2fs, " + set_color("valid_score", 'blue') + ": %f]") % \
