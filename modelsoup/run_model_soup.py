@@ -70,37 +70,45 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
     logger.info(model)
     
     trainer = get_trainer(config['MODEL_TYPE'], 'basic')
-    for recipe in MODEL_RECIPE:
+    for recipe in MODEL_RECIPE[:1]:
         recipe_path = os.path.join(EXP_PATH, recipe)
         # # trainer loading and initialization
         recipe_trainer = trainer(config, model)
         recipe_trainer.resume_checkpoint(resume_file=os.path.join(recipe_path, 'model.pth'))
         recipe_model_weight = recipe_trainer.model.state_dict()
         
-        test_recipe_result = recipe_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
-        logger.info(set_color('test result', 'yellow') + f': {test_recipe_result}')
+        # test_recipe_result = recipe_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
+        # logger.info(set_color('test result', 'yellow') + f': {test_recipe_result}')
         
-        recipe_fisher_weight = recipe_trainer.compute_fisher(eval_data=valid_data)
+        recipe_fisher_weight = recipe_trainer.compute_fisher(eval_data=valid_data, load_best_model=False, show_progress=config['show_progress'])
         
+        layer_names = list(recipe_model_weight.keys())
         
         if recipe==MODEL_RECIPE[0]:
-            fisher_soup ={k : torch.mul(v,recipe_fisher_weight[k]) for k, v in recipe_model_weight.items()}
-            devided_by = {k : recipe_fisher_weight[k] for k,v in recipe_model_weight.items()}
+            fisher_soup ={layer : torch.mul(v,recipe_fisher_weight[layer]) for layer, v in recipe_model_weight.items()}
+            devided_by = {layer : recipe_fisher_weight[layer] for layer in layer_names}
         else:
-            fisher_soup = {k : torch.mul(v,recipe_fisher_weight[k]) + fisher_soup[k] for k, v in recipe_model_weight.items()}
-            devided_by = {k : recipe_fisher_weight[k] for k,v in recipe_model_weight.items()}
-        
-    eps = 1e-15
-    fisher_soup = {k: fisher_soup[k]/(devided_by[k]+eps) for k in list(recipe_model_weight.keys())}
+            fisher_soup = {layer : torch.mul(v,recipe_fisher_weight[layer]) + fisher_soup[layer] for layer, v in recipe_model_weight.items()}
+            devided_by = {layer : recipe_fisher_weight[layer] + devided_by[layer] for layer in layer_names}
+    
+  
+    eps = 1e-10
+    fisher_soup = {layer: fisher_soup[layer]/(devided_by[layer]+eps) for layer in layer_names}
     torch.save(fisher_soup, os.path.join(config['log_dir'],'fisher_model.pt'))
     
     fisher_trainer = trainer(config, model)
     fisher_trainer.model.load_state_dict(fisher_soup)
     
+    # model fiser finetune
+    best_valid_score, best_valid_result = fisher_trainer.fit(
+        train_data, valid_data, saved=saved, show_progress=config['show_progress']
+    )
+    fisher_soup = fisher_trainer.model.state_dict()
+    # torch.save(fisher_soup, os.path.join(config['log_dir'],'fisher_finetuned_model.pt'))
     
     # model evaluation
     print(config['eval_setting'],'----------------------------------------------------------------------------------------')
-    test_result = fisher_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
+    test_result = fisher_trainer.evaluate(eval_data=test_data, load_best_model=saved, show_progress=config['show_progress'])
     logger.info(set_color('test result', 'yellow') + f': {test_result}')
     wandb.log({'test_result' : test_result})
     

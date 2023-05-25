@@ -229,7 +229,7 @@ class BasicRec(SequentialRecommender):
         return scores
 
     def calculate_fisher(self, interaction):
-        fisher_temp=1
+        fisher_temp=10
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         seq_output = self.forward(item_seq, item_seq_len)
@@ -242,4 +242,9 @@ class BasicRec(SequentialRecommender):
         log_probs = torch.nn.functional.log_softmax(logits/fisher_temp, dim=-1)
         probs = torch.nn.functional.softmax(logits/fisher_temp, dim=-1)
         
-        return log_probs, probs
+        pos_items = pos_items.unsqueeze(-1)
+        target_item_log_probs = torch.gather(log_probs, dim=-1, index=pos_items).view(-1)
+        target_item_probs = torch.gather(probs, dim=-1, index=pos_items).view(-1)
+        
+        return target_item_log_probs, target_item_probs
+    

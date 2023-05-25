@@ -142,7 +142,7 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
         trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
         
         print(config['eval_setting'])
-        test_random_result = trainer.evaluate(test_data, load_best_model=saved, show_progress=config['show_progress'])
+        test_random_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
         
         logger.info(set_color('test random result', 'yellow') + f': {test_random_result}')
         wandb.log({'test_random_result':test_random_result})
@@ -160,7 +160,7 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
         trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
         
         print(config['eval_setting'])
-        test_popular_result = trainer.evaluate(test_data, load_best_model=saved, show_progress=config['show_progress'])
+        test_popular_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
         
         logger.info(set_color('test popular result', 'yellow') + f': {test_popular_result}')
         wandb.log({'test_popular_result':test_popular_result})

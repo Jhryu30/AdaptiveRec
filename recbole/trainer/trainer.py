@@ -506,23 +506,48 @@ class Trainer(AbstractTrainer):
             fisher_matrix[name] = torch.zeros_like(param.data).detach()
         
         for batch_idx, batched_data in iter_data:
-            # if eval_data.dl_type == DataLoaderType.FULL:
-            #     interaction, scores = self._full_sort_batch_eval(batched_data)
-            # else:
-            #     interaction = batched_data
-            #     batch_size = interaction.length
-            #     if batch_size <= self.test_batch_size:
-            #         scores = self.model.predict(interaction.to(self.device))
-            #     else:
-            #         scores = self._spilt_predict(interaction, batch_size)
-
-            # batch_matrix = self.evaluator.collect(interaction, scores)
-            # batch_matrix_list.append(batch_matrix)
             interaction, history_index, swap_row, swap_col_after, swap_col_before = batched_data
             log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
             
             # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
             grads = autograd.grad(log_probs, self.model.parameters())
+            
+            for (name, param), grad in zip(self.model.named_parameters(), grads):
+                if param.requires_grad:
+                    fisher_matrix[name] += (probs * grad**2).detach()
+                    # fisher_matrix[name] += (grad**2).detach()
+                    
+            self.optimizer.zero_grad()
+            
+        
+        return fisher_matrix
+    
+    def compute_fisher_train(self, eval_data, load_best_model=True, model_file=None, show_progress=False):
+        self.model.eval()
+        
+        if eval_data.dl_type == DataLoaderType.FULL:
+            if self.item_tensor is None:
+                self.item_tensor = eval_data.get_item_feature().to(self.device).repeat(eval_data.step)
+            self.tot_item_num = eval_data.dataset.item_num
+            
+        iter_data = (
+            tqdm(
+                enumerate(eval_data),
+                total=len(eval_data),
+                desc=set_color(f"Evaluate   ", 'pink'),
+            ) if show_progress else enumerate(eval_data)
+        )
+        
+        fisher_matrix = {}
+        for name, param in self.model.named_parameters():
+            fisher_matrix[name] = torch.zeros_like(param.data).detach()
+        
+        for batch_idx, batched_data in iter_data:
+            interaction  = batched_data
+            loss = self.model.calculate_loss(interaction.to(self.device))
+            
+            # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            loss.backward()
             
             for (name, param), grad in zip(self.model.named_parameters(), grads):
                 if param.requires_grad:
