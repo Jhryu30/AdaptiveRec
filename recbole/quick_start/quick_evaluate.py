@@ -68,8 +68,9 @@ def run_recbole_eval(model=None, dataset=None, config_file_list=None, config_dic
 
     # logger.info(set_color('best valid ', 'yellow') + f': {best_valid_result}')
     # logger.info(set_color('test result', 'yellow') + f': {test_result}')
-
-    wandb.log({'test_result_uniform':test_result})
+    
+    eval_setting = config['eval_setting'].split(',')[1]
+    wandb.log({f'test_result_{eval_setting}':test_result})
 
     return {
         # 'best_valid_score': best_valid_score,
