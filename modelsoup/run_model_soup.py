@@ -76,16 +76,22 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
         recipe_trainer = trainer(config, model)
         recipe_trainer.resume_checkpoint(resume_file=os.path.join(recipe_path, 'model.pth'))
         recipe_model_weight = recipe_trainer.model.state_dict()
+        
+        test_recipe_result = recipe_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
+        logger.info(set_color('test result', 'yellow') + f': {test_recipe_result}')
+        
         recipe_fisher_weight = recipe_trainer.compute_fisher(eval_data=valid_data)
         
+        
         if recipe==MODEL_RECIPE[0]:
-            fisher_soup ={k :torch.mul(v,recipe_fisher_weight[k]) for k, v in recipe_model_weight.items()}
-            devided_by = {k: recipe_fisher_weight[k] for k,v in recipe_model_weight.items()}
+            fisher_soup ={k : torch.mul(v,recipe_fisher_weight[k]) for k, v in recipe_model_weight.items()}
+            devided_by = {k : recipe_fisher_weight[k] for k,v in recipe_model_weight.items()}
         else:
             fisher_soup = {k : torch.mul(v,recipe_fisher_weight[k]) + fisher_soup[k] for k, v in recipe_model_weight.items()}
-            devided_by = {k: recipe_fisher_weight[k] for k,v in recipe_model_weight.items()}
+            devided_by = {k : recipe_fisher_weight[k] for k,v in recipe_model_weight.items()}
         
-    fisher_soup = {k: fisher_soup[k]/(devided_by[k]) for k in list(recipe_model_weight.keys())}
+    eps = 1e-15
+    fisher_soup = {k: fisher_soup[k]/(devided_by[k]+eps) for k in list(recipe_model_weight.keys())}
     torch.save(fisher_soup, os.path.join(config['log_dir'],'fisher_model.pt'))
     
     fisher_trainer = trainer(config, model)
@@ -93,7 +99,7 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
     
     
     # model evaluation
-    print(config['eval_setting'],'-----------')
+    print(config['eval_setting'],'----------------------------------------------------------------------------------------')
     test_result = fisher_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
     logger.info(set_color('test result', 'yellow') + f': {test_result}')
     wandb.log({'test_result' : test_result})
@@ -102,7 +108,9 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
     
     # random setting (uni100)
     if config['eval_uniform_setting'] == True:
-        config['eval_setting'] = 'TO_LS,uni100' 
+        config['eval_setting'] = 'TO_LS,uni100'
+        config['eval_batch_size']=256
+        
         dataset = create_dataset(config)
         train_data, valid_data, test_data = data_preparation(config, dataset)
         
@@ -110,7 +118,7 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
         trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
         trainer.model.load_state_dict(fisher_soup)
         
-        print(config['eval_setting'],'-----------')
+        print(config['eval_setting'],'----------------------------------------------------------------------------------------')
         test_random_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
         
         logger.info(set_color('test random result', 'yellow') + f': {test_random_result}')
@@ -120,7 +128,9 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
 
     # popular setting (pop100)
     if config['eval_popular_setting'] == True:
-        config['eval_setting'] = 'TO_LS,pop100' 
+        config['eval_setting'] = 'TO_LS,pop100'
+        config['eval_batch_size']=256
+        
         dataset = create_dataset(config)
         train_data, valid_data, test_data = data_preparation(config, dataset)
         
@@ -128,7 +138,7 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
         trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
         trainer.model.load_state_dict(fisher_soup)
         
-        print(config['eval_setting'],'-----------')
+        print(config['eval_setting'],'----------------------------------------------------------------------------------------')
         test_popular_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
         
         logger.info(set_color('test popular result', 'yellow') + f': {test_popular_result}')

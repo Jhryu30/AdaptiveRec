@@ -32,13 +32,11 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
     """
     # configurations initialization
     config = Config(model=model, dataset=dataset, config_file_list=config_file_list, config_dict=config_dict)
-        
     wandb.init(project='AdaptiveRec', 
             name=config.model+config['contrast']+config['eval_setting'].split(',')[1],
             config=config) #, mode='disabled')
     # init_seed(config['seed'], config['reproducibility'])
 
-    breakpoint()
     # logger initialization
     init_logger(config)
     logger = getLogger()

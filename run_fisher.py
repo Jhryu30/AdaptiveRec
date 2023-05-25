@@ -6,7 +6,7 @@ from recbole.quick_start import run_recbole
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', type=str, default='AdaptiveRec', help='name of models')
+    parser.add_argument('--model', '-m', type=str, default='BasicRec', help='name of models')
     parser.add_argument('--dataset', '-d', type=str, default='ml-1m', help='name of datasets')
     parser.add_argument('--config_files', type=str, default='seq.yaml', help='config files')
 

@@ -521,10 +521,13 @@ class Trainer(AbstractTrainer):
             interaction, history_index, swap_row, swap_col_after, swap_col_before = batched_data
             log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
             
-            grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            grads = autograd.grad(log_probs, self.model.parameters())
+            
             for (name, param), grad in zip(self.model.named_parameters(), grads):
                 if param.requires_grad:
-                    fisher_matrix[name] += (grad**2).detach()
+                    fisher_matrix[name] += (probs * grad**2).detach()
+                    # fisher_matrix[name] += (grad**2).detach()
                     
             self.optimizer.zero_grad()
             
