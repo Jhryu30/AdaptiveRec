@@ -13,9 +13,8 @@ if __name__ == '__main__':
     args, _ = parser.parse_known_args()
 
     config_file_list = args.config_files.strip().split(' ') if args.config_files else None
-    # result, log_dir = run_recbole(model=args.model, dataset=args.dataset, config_file_list=config_file_list)
-    
-    log_dir = 'log/AdaptiveRec/ml-1m/bs256-lmd0.1-sem0.1-us_x-May-24-2023_02-23-04-lr0.001-l20-tau1-dot-DPh0.5-DPa0.5'
+    result, log_dir = run_recbole(model=args.model, dataset=args.dataset, config_file_list=config_file_list)
+
     
     # random setting
     args.eval_setting ='TO_LS,uni100'
