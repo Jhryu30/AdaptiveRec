@@ -72,3 +72,7 @@ cosine_lr_scheduler: true
 AST: false
 MONS: 'upper'  # 'lower'
 k: 0.1
+
+# parameter merging option
+do_fisher_merging : true
+do_uniform_merging : true

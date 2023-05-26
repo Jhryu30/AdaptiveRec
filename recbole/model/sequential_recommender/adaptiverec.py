@@ -90,7 +90,8 @@ class AdaptiveRec(SequentialRecommender):
         
         if self.AST:
             self.AST_layer = nn.Sequential(
-                        nn.Linear(self.hidden_size,1),
+                        nn.Linear(self.hidden_size,  int(self.hidden_size/8)),
+                        nn.Linear(int(self.hidden_size/8), 1),
                         nn.Sigmoid()
                         )
             
@@ -173,8 +174,8 @@ class AdaptiveRec(SequentialRecommender):
         # for AST=adaptive_similarity_threshold
         if self.AST:
             AST = self.AST_layer(output)
-            AST = torch.mean(AST)
-            AST = 2.1*(AST - 0.5)   # for make in [-1,1]
+            # AST = torch.mean(AST)       # batch안에서 mean으로 하지말고 각 seq마다 AST계산
+            AST = 2.1*(AST - 0.5)   # for make in [-1,1]    # 2.1은 sigmoid 떄문에 설정 원래는 2여야함
             # print(f'AST={AST}')
             self.AST_value = AST
         else:
@@ -249,8 +250,10 @@ class AdaptiveRec(SequentialRecommender):
             #     alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
             #                                            batch_size=item_seq_len.shape[0])
             
+        if self.AST : 
+            loss = loss + 0.1*torch.norm(AST-sim_thres, p=2)
 
-        return loss + 0.1*torch.norm(AST-0.2, p=2), adaptive_sim_thres
+        return loss , adaptive_sim_thres
 
     def ClampMax(self, x, val):
         """
@@ -311,7 +314,10 @@ class AdaptiveRec(SequentialRecommender):
 
         if AST != None:
             replace_value = -1e9
-            negative_samples = self.ClampMax(negative_samples, AST)
+            AST = torch.concat([AST,AST])
+            negative_samples = (torch.nn.ReLU()(negative_samples-AST) * replace_value) + negative_samples    # 곱셈을 이용하여 -1e9에 가까운값으로 밀어버림
+
+            # negative_samples = self.ClampMax(negative_samples, AST) # 0.8 이상의 값을 0.8로 밀어버림
             # negative_samples[negative_samples>=AST] = replace_value
             # negative_samples[negative_samples>AST] = -1e9
             # -torch.nn.Threshold(-thr,-val)(-A)
