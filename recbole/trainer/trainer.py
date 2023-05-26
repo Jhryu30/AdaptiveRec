@@ -94,8 +94,8 @@ class Trainer(AbstractTrainer):
         self.valid_metric = config['valid_metric'].lower()
         self.valid_metric_bigger = config['valid_metric_bigger']
         self.test_batch_size = config['eval_batch_size']
-        # self.device = config['device']
-        self.device = torch.device('cuda:'+str(config['gpu_id']))
+        self.device = config['device']
+        # self.device = torch.device('cuda:'+str(config['gpu_id']))
         self.checkpoint_dir = config['checkpoint_dir']
         ensure_dir(self.checkpoint_dir)
         saved_model_file = '{}-{}.pth'.format(self.config['model'], get_local_time())
@@ -216,7 +216,6 @@ class Trainer(AbstractTrainer):
             self.optimizer.step()
             if self.cosine_lr_scheduler :
                 self.lr_scheduler.step_update(epoch_idx)
-                # print(self.optimizer.param_groups[0]['lr'])/
 
         # self.align.append(np.mean(ave_align))
         # self.uni.append(np.mean(ave_uni))
@@ -555,13 +554,13 @@ class Trainer(AbstractTrainer):
             interaction, history_index, swap_row, swap_col_after, swap_col_before = batched_data
             log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
             
-            # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
-            grads = autograd.grad(log_probs, self.model.parameters())
+            grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            # grads = autograd.grad(log_probs, self.model.parameters())
             
             for (name, param), grad in zip(self.model.named_parameters(), grads):
                 if param.requires_grad:
-                    fisher_matrix[name] += (probs * grad**2).detach()
-                    # fisher_matrix[name] += (grad**2).detach()
+                    # fisher_matrix[name] += (probs * grad**2).detach()
+                    fisher_matrix[name] += (grad**2).detach()
                     
             self.optimizer.zero_grad()
             
@@ -591,22 +590,31 @@ class Trainer(AbstractTrainer):
             fisher_matrix[name] = torch.zeros_like(param.data).detach()
         
         for batch_idx, batched_data in iter_data:
-            interaction = batched_data
+            interaction, history_index, swap_row, swap_col_after, swap_col_before = batched_data
             log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
             
-            # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
-            grads = autograd.grad(log_probs, self.model.parameters(), grad_outputs=torch.ones_like(log_probs.unsqueeze(0)), is_grads_batched=True)
+            # # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            # grads = autograd.grad(log_probs, self.model.parameters(), grad_outputs=torch.ones_like(log_probs.unsqueeze(0)), is_grads_batched=True)
+            # for (name, param), grad in zip(self.model.named_parameters(), grads):
+            #     fisher_matrix[name] += (probs * grad**2).squeeze(0).detach()
+            #         # fisher_matrix[name] += (grad**2).detach()
+                        
+            # self.optimizer.zero_grad()
+            
+            # if batch_idx > 5000:
+            #     break
+
+            grads = autograd.grad(log_probs, self.model.parameters(), grad_outputs=probs.unsqueeze(0), is_grads_batched=True)
             for (name, param), grad in zip(self.model.named_parameters(), grads):
-                if param.requires_grad:
-                    breakpoint()
-                    isher_matrix[name] += (probs * grad**2).squeeze(-1).detach()
+                fisher_matrix[name] += grad.squeeze(0).detach()
                     # fisher_matrix[name] += (grad**2).detach()
                         
             self.optimizer.zero_grad()
 
         
         return fisher_matrix
-        
+    
+
 
 
     def fit_fisher(self, train_data, valid_data=None, verbose=True, saved=True, show_progress=False, callback_fn=None):
@@ -743,28 +751,28 @@ class Trainer(AbstractTrainer):
             # losses, alignment, uniformity = loss_func(interaction)
             # ave_align.append(alignment.item())
             # ave_uni.append(uniformity.item())
-            if isinstance(losses, tuple):
-                loss = sum(losses)
-                loss_tuple = tuple(per_loss.item() for per_loss in losses)
+            if isinstance(original_losses, tuple):
+                loss = sum(original_losses)
+                loss_tuple = tuple(per_loss.item() for per_loss in original_losses)
                 total_loss = loss_tuple if total_loss is None else tuple(map(sum, zip(total_loss, loss_tuple)))
             else:
-                loss = losses
-                total_loss = losses.item() if total_loss is None else total_loss + losses.item()
+                loss = original_losses
+                total_loss = original_losses.item() if total_loss is None else total_loss + original_losses.item()
             self._check_nan(loss)
-            loss.backward()
-
+            original_losses.backward()
             
+            self.optimizer.zero_grad()
             log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
-            
-            # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
             grads = autograd.grad(log_probs, self.model.parameters())
-            
             for (name, param), grad in zip(self.model.named_parameters(), grads):
                 if param.requires_grad:
-                    fisher_matrix[name] += (probs * grad**2).detach()
-                    # fisher_matrix[name] += (grad**2).detach()
+                    param.data -= param.grad*(1/(probs * grad**2))
                     
-            self.optimizer.zero_grad()
+            self.optimizer.step()
+            # fisher_loss = 
+            # loss.backward()
+
+           
 
             
             if self.clip_grad_norm:
