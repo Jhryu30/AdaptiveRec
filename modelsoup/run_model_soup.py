@@ -70,7 +70,7 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
     logger.info(model)
     
     trainer = get_trainer(config['MODEL_TYPE'], 'basic')
-    for recipe in MODEL_RECIPE[:1]:
+    for recipe in MODEL_RECIPE:
         recipe_path = os.path.join(EXP_PATH, recipe)
         # # trainer loading and initialization
         recipe_trainer = trainer(config, model)
@@ -80,7 +80,7 @@ def run_model_soup(model=None, dataset=None, config_file_list=None, config_dict=
         # test_recipe_result = recipe_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
         # logger.info(set_color('test result', 'yellow') + f': {test_recipe_result}')
         
-        recipe_fisher_weight = recipe_trainer.compute_fisher(eval_data=valid_data, load_best_model=False, show_progress=config['show_progress'])
+        recipe_fisher_weight = recipe_trainer.compute_fisher_train(eval_data=train_data, load_best_model=False, show_progress=config['show_progress'])
         
         layer_names = list(recipe_model_weight.keys())
         

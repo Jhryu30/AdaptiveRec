@@ -83,6 +83,8 @@ class BasicRec(SequentialRecommender):
         self.mask_default = self.mask_correlated_samples(batch_size=self.batch_size)
         self.aug_nce_fct = nn.CrossEntropyLoss()
         self.sem_aug_nce_fct = nn.CrossEntropyLoss()
+        
+        self.AST_value = 0
 
         # parameters initialization
         self.apply(self._init_weights)

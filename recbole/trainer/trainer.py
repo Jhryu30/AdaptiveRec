@@ -550,7 +550,7 @@ class Trainer(AbstractTrainer):
         fisher_matrix = {}
         for name, param in self.model.named_parameters():
             fisher_matrix[name] = torch.zeros_like(param.data).detach()
-        
+            
         for batch_idx, batched_data in iter_data:
             interaction, history_index, swap_row, swap_col_after, swap_col_before = batched_data
             log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
@@ -564,6 +564,8 @@ class Trainer(AbstractTrainer):
                     # fisher_matrix[name] += (grad**2).detach()
                     
             self.optimizer.zero_grad()
+            
+            # if batch_idx == len(eval_data)//
             
         
         return fisher_matrix
@@ -589,11 +591,173 @@ class Trainer(AbstractTrainer):
             fisher_matrix[name] = torch.zeros_like(param.data).detach()
         
         for batch_idx, batched_data in iter_data:
-            interaction  = batched_data
-            loss = self.model.calculate_loss(interaction.to(self.device))
+            interaction = batched_data
+            log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
             
             # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            grads = autograd.grad(log_probs, self.model.parameters(), grad_outputs=torch.ones_like(log_probs.unsqueeze(0)), is_grads_batched=True)
+            for (name, param), grad in zip(self.model.named_parameters(), grads):
+                if param.requires_grad:
+                    breakpoint()
+                    isher_matrix[name] += (probs * grad**2).squeeze(-1).detach()
+                    # fisher_matrix[name] += (grad**2).detach()
+                        
+            self.optimizer.zero_grad()
+
+        
+        return fisher_matrix
+        
+
+
+    def fit_fisher(self, train_data, valid_data=None, verbose=True, saved=True, show_progress=False, callback_fn=None):
+        r"""Train the model based on the train data and the valid data.
+
+        Args:
+            train_data (DataLoader): the train data
+            valid_data (DataLoader, optional): the valid data, default: None.
+                                               If it's None, the early_stopping is invalid.
+            verbose (bool, optional): whether to write training and evaluation information to logger, default: True
+            saved (bool, optional): whether to save the model parameters, default: True
+            show_progress (bool): Show the progress of training epoch and evaluate epoch. Defaults to ``False``.
+            callback_fn (callable): Optional callback function executed at end of epoch.
+                                    Includes (epoch_idx, valid_score) input arguments.
+
+        Returns:
+             (float, dict): best valid score and best valid result. If valid_data is None, it returns (-1, None)
+        """
+        if saved and self.start_epoch >= self.epochs:
+            self._save_checkpoint(-1)
+
+        # self.align = []
+        # self.uni = []
+        for epoch_idx in range(self.start_epoch, self.epochs):
+            # train
+            training_start_time = time()
+            train_loss = self._train_epoch_fisher(train_data, epoch_idx, show_progress=show_progress)
+            self.train_loss_dict[epoch_idx] = sum(train_loss) if isinstance(train_loss, tuple) else train_loss
+            training_end_time = time()
+            train_loss_output = \
+                self._generate_train_loss_output(epoch_idx, training_start_time, training_end_time, train_loss)
+            if verbose:
+                self.logger.info(train_loss_output)
+
+            # eval
+            if self.eval_step <= 0 or not valid_data:
+                if saved:
+                    self._save_checkpoint(epoch_idx)
+                    update_output = set_color('Saving current', 'blue') + ': %s' % self.saved_model_file
+                    if verbose:
+                        self.logger.info(update_output)
+                continue
+            if (epoch_idx + 1) % self.eval_step == 0:
+                valid_start_time = time()
+                valid_score, valid_result = self._valid_epoch(valid_data, show_progress=show_progress)
+                self.best_valid_score, self.cur_step, stop_flag, update_flag = early_stopping(
+                    valid_score,
+                    self.best_valid_score,
+                    self.cur_step,
+                    max_step=self.stopping_step,
+                    bigger=self.valid_metric_bigger
+                )
+                wandb.log({'loss':train_loss,
+                           'valid_score' : valid_score,
+                           'similarity_thres' : self.sim_thres,
+                           'AST' : self.model.AST_value})
+                valid_end_time = time()
+                valid_score_output = (set_color("epoch %d evaluating", 'green') + " [" + set_color("time", 'blue')
+                                    + ": %.2fs, " + set_color("valid_score", 'blue') + ": %f]") % \
+                                     (epoch_idx, valid_end_time - valid_start_time, valid_score)
+                valid_result_output = set_color('valid result', 'blue') + ': \n' + dict2str(valid_result)
+                if verbose:
+                    self.logger.info(valid_score_output)
+                    self.logger.info(valid_result_output)
+                if update_flag:
+                    if saved:
+                        self._save_checkpoint(epoch_idx)
+                        update_output = set_color('Saving current best', 'blue') + ': %s' % self.saved_model_file
+                        if verbose:
+                            self.logger.info(update_output)
+                    self.best_valid_result = valid_result
+
+                if callback_fn:
+                    callback_fn(epoch_idx, valid_score)
+
+                if stop_flag:
+                    stop_output = 'Finished training, best eval result in epoch %d' % \
+                                  (epoch_idx - self.cur_step * self.eval_step)
+                    if verbose:
+                        self.logger.info(stop_output)
+                    break
+        if self.draw_loss_pic:
+            save_path = '{}-{}-train_loss.pdf'.format(self.config['model'], get_local_time())
+            self.plot_train_loss(save_path=os.path.join(save_path))
+            
+        
+        # import pandas as pd
+        # data = pd.DataFrame({'align': self.align, 'uniform': self.uni})
+        # data.to_csv(
+        #     self.config['log_dir'] + '/' + self.config['model'] + '-' + self.config['dataset'] + '-' + self.config['contrast'] + '.csv', index=False)
+        return self.best_valid_score, self.best_valid_result
+
+
+    def _train_epoch_fisher(self, train_data, epoch_idx, loss_func=None, show_progress=False):
+        r"""Train the model in an epoch
+
+        Args:
+            train_data (DataLoader): The train data.
+            epoch_idx (int): The current epoch id.
+            loss_func (function): The loss function of :attr:`model`. If it is ``None``, the loss function will be
+                :attr:`self.model.calculate_loss`. Defaults to ``None``.
+            show_progress (bool): Show the progress of training epoch. Defaults to ``False``.
+
+        Returns:
+            float/tuple: The sum of loss returned by all batches in this epoch. If the loss in each batch contains
+            multiple parts and the model return these multiple parts loss instead of the sum of loss, it will return a
+            tuple which includes the sum of loss in each part.
+        """
+        self.model.sim_log = []
+        self.model.sim_noDA_log = []
+        sim_thres_epoch = []
+
+        self.model.train()
+        loss_func = loss_func or self.model.calculate_loss
+        total_loss = None
+        iter_data = (
+            tqdm(
+                enumerate(train_data),
+                total=len(train_data),
+                desc=set_color(f"Train {epoch_idx:>5}", 'pink'),
+            ) if show_progress else enumerate(train_data)
+        )
+        # ave_align = []
+        # ave_uni = []
+        
+        fisher_matrix = {}
+        for name, param in self.model.named_parameters():
+            fisher_matrix[name] = torch.zeros_like(param.data).detach()
+            
+        for batch_idx, interaction in iter_data:
+            interaction = interaction.to(self.device)
+            self.optimizer.zero_grad()
+            original_losses = loss_func(interaction)
+            # losses, alignment, uniformity = loss_func(interaction)
+            # ave_align.append(alignment.item())
+            # ave_uni.append(uniformity.item())
+            if isinstance(losses, tuple):
+                loss = sum(losses)
+                loss_tuple = tuple(per_loss.item() for per_loss in losses)
+                total_loss = loss_tuple if total_loss is None else tuple(map(sum, zip(total_loss, loss_tuple)))
+            else:
+                loss = losses
+                total_loss = losses.item() if total_loss is None else total_loss + losses.item()
+            self._check_nan(loss)
             loss.backward()
+
+            
+            log_probs, probs = self.model.calculate_fisher(interaction.to(self.device))
+            
+            # grads = autograd.grad(log_probs, self.model.parameters(), probs, retain_graph=True)
+            grads = autograd.grad(log_probs, self.model.parameters())
             
             for (name, param), grad in zip(self.model.named_parameters(), grads):
                 if param.requires_grad:
@@ -601,10 +765,37 @@ class Trainer(AbstractTrainer):
                     # fisher_matrix[name] += (grad**2).detach()
                     
             self.optimizer.zero_grad()
+
             
-        
-        return fisher_matrix
-        
+            if self.clip_grad_norm:
+                clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
+            self.optimizer.step()
+            if self.cosine_lr_scheduler :
+                self.lr_scheduler.step_update(epoch_idx)
+                # print(self.optimizer.param_groups[0]['lr'])/
+
+        # self.align.append(np.mean(ave_align))
+        # self.uni.append(np.mean(ave_uni))
+        self.sim_thres = np.mean(sim_thres_epoch)
+
+        # save similarity
+        self.model.similarity_log = {}
+        self.model.similarity_log.update({epoch_idx : self.model.sim_log})
+        with open(self.saved_similarity_file.format(epoch_idx), 'wb') as f:
+                pickle.dump(self.model.similarity_log, f)
+
+        self.model.similarity_noDA_log = {}
+        self.model.similarity_noDA_log.update({epoch_idx : self.model.sim_noDA_log})
+        with open(self.saved_similarity_noDA_file.format(epoch_idx), 'wb') as f:
+                pickle.dump(self.model.similarity_noDA_log, f)
+
+        del self.model.sim_log
+        del self.model.sim_noDA_log
+        del sim_thres_epoch
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return total_loss
         
 
 
