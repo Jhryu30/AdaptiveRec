@@ -6,6 +6,12 @@
 recbole.quick_start
 ########################
 """
+import os
+import sys
+sys.path.append('../')
+
+import torch
+
 import logging
 from logging import getLogger
 
@@ -16,10 +22,13 @@ from recbole.utils.utils import set_color
 
 import wandb
 
+EXP_PATH = 'log/FINETUNE/BasicRec/ml-1m/bs256-lmd0.1-sem0.1-us_x-May-27-2023_18-07-14-lr0.001-l20-tau1-dot-DPh0.5-DPa0.5/AdaptiveRec'
+MODEL_RECIPE = os.listdir(EXP_PATH)
 
 
 
-def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=None, saved=True):
+
+def run_uniform(model=None, dataset=None, config_file_list=None, config_dict=None, saved=True):
     r""" A fast running api, which includes the complete process of
     training and testing a model on a specified dataset
 
@@ -30,11 +39,14 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
         config_dict (dict): parameters dictionary used to modify experiment parameters
         saved (bool): whether to save the model
     """
+    print('####### UNIFORM MERGIGNG ######'*5)
     # configurations initialization
     config = Config(model=model, dataset=dataset, config_file_list=config_file_list, config_dict=config_dict)
-    wandb.init(project='AdaptiveRec', 
-            name=config.model+config['contrast']+config['eval_setting'].split(',')[1],
-            config=config) #, mode='disabled')
+    config['epochs']=10
+        
+    wandb.init(project='ModelSoup', 
+            name='uniform',
+            config=config, reinit=True) #, mode='disabled')
     # init_seed(config['seed'], config['reproducibility'])
 
     # logger initialization
@@ -49,6 +61,8 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
     
     logger.info(config)
 
+    num_model = len(MODEL_RECIPE)
+    
     # dataset filtering
     dataset = create_dataset(config)
     logger.info(dataset)
@@ -60,74 +74,59 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
     model = get_model(config['model'])(config, train_data).to(config['device'])
     logger.info(model)
     
-    # trainer loading and initialization
-    trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
-
-    # model training
-    best_valid_score, best_valid_result = trainer.fit(
+    trainer = get_trainer(config['MODEL_TYPE'], 'basic')
+    num_model = len(MODEL_RECIPE); nth_model = 0
+    for recipe in MODEL_RECIPE:
+        nth_model += 1
+        print(f'Load {nth_model}/{num_model}:', recipe)
+        recipe_path = os.path.join(EXP_PATH, recipe)
+        # # trainer loading and initialization
+        recipe_trainer = trainer(config, model)
+        
+        try:
+            recipe_trainer.resume_checkpoint(resume_file=recipe_path)
+            # recipe_trainer.model.load_state_dict(torch.load(recipe_path, map_location=recipe_trainer.device))
+        except:
+            padded_ = torch.load(recipe_path, map_location=recipe_trainer.device)
+            layer_ = 'item_embedding.weight'
+            layer_param = padded_['state_dict'][layer_]
+            padded_['state_dict'][layer_] =  layer_param[:-1]
+            
+            recipe_trainer.model.load_state_dict(padded_['state_dict'])
+            
+        # recipe_trainer.resume_checkpoint(resume_file=os.path.join(recipe_path, 'model.pth'))
+        # recipe_trainer.resume_checkpoint(resume_file=recipe_path)
+        recipe_model_weight = recipe_trainer.model.state_dict()
+        
+        if recipe==MODEL_RECIPE[0]:
+            uniform_soup ={k : v for k, v in recipe_model_weight.items()}
+        else:
+            uniform_soup = {k : v+uniform_soup[k] for k, v in recipe_model_weight.items()}
+            
+        test_result = recipe_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
+        logger.info(set_color('test result', 'yellow') + f': {test_result}')
+        wandb.log({f'test_result' : test_result})
+        
+        del recipe_trainer
+            
+    torch.save(uniform_soup, os.path.join(config['log_dir'],'uniform_model.pt'))
+    
+    uniform_trainer = trainer(config, model)
+    uniform_trainer.model.load_state_dict(uniform_soup)
+    
+    os.makedirs(os.path.join(config['log_dir'], config['model']), exist_ok=True)
+    # model uniform finetune
+    best_valid_score, best_valid_result = uniform_trainer.fit(
         train_data, valid_data, saved=saved, show_progress=config['show_progress']
     )
-
-
-    import numpy as np
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    from sklearn.decomposition import TruncatedSVD
-
-    embedding_matrix = model.item_embedding.weight[1:].cpu().detach().numpy()
-    svd = TruncatedSVD(n_components=2)
-    svd.fit(embedding_matrix)
-    comp_tr = np.transpose(svd.components_)
-    proj = np.dot(embedding_matrix, comp_tr)
+    uniform_soup = uniform_trainer.model.state_dict()
+    torch.save(uniform_soup, os.path.join(config['log_dir'],'uniform_finetuned_model.pt'))
     
-    cnt = {}
-    for i in dataset['item_id']:
-        if i.item() in cnt:
-            cnt[i.item()] += 1
-        else:
-            cnt[i.item()] = 1
-    
-    freq = np.zeros(embedding_matrix.shape[0])
-    for i in cnt:
-        freq[i-1] = cnt[i]
-    
-    # freq /= freq.max()
-
-    sns.set(style='darkgrid')
-    sns.set_context("notebook", font_scale=1.8, rc={"lines.linewidth": 3, 'lines.markersize': 20})
-    plt.figure(figsize=(6, 4.5))
-    plt.scatter(proj[:, 0], proj[:, 1], s=1, c=freq, cmap='viridis_r')
-    plt.colorbar()
-    plt.xlim(-2, 2)
-    plt.ylim(-2, 2)
-    # plt.axis('square')
-    # plt.show()
-    plt.savefig(log_dir + '/' + config['model'] + '-' + config['dataset'] + '.pdf', format='pdf', transparent=False, bbox_inches='tight')
-    
-    from scipy.linalg import svdvals
-    svs = svdvals(embedding_matrix)
-    svs /= svs.max()
-    np.save(log_dir + '/sv.npy', svs)
-
-    sns.set(style='darkgrid')
-    sns.set_context("notebook", font_scale=1.8, rc={"lines.linewidth": 3, 'lines.markersize': 20})
-    plt.figure(figsize=(6, 4.5))
-    plt.plot(svs)
-    # plt.show()
-    plt.savefig(log_dir + '/svs.pdf', format='pdf', transparent=False, bbox_inches='tight')
-
     # model evaluation
-    print(config['eval_setting'])
-    test_result = trainer.evaluate(test_data, load_best_model=saved, show_progress=config['show_progress'])
-
-    logger.info(set_color('best valid ', 'yellow') + f': {best_valid_result}')
+    print(config['eval_setting'],'-----------')
+    test_result = uniform_trainer.evaluate(eval_data=test_data, load_best_model=False, show_progress=config['show_progress'])
     logger.info(set_color('test result', 'yellow') + f': {test_result}')
-    
-    wandb.log({'best_valid_score' : best_valid_score,
-               'valid_score_bigger': config['valid_metric_bigger'],
-               'best_valid_result': best_valid_result,
-                'similarity_thres' : trainer.sim_thres,
-                'test_result' : test_result})
+    wandb.log({'uniform_test_full_result' : test_result})
     
     
     
@@ -139,13 +138,13 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
         
         model = get_model(config['model'])(config, train_data).to(config['device'])
         trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
-        trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
+        trainer.model.load_state_dict(uniform_soup)
         
-        print(config['eval_setting'])
+        print(config['eval_setting'],'-----------')
         test_random_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
         
         logger.info(set_color('test random result', 'yellow') + f': {test_random_result}')
-        wandb.log({'test_random_result':test_random_result})
+        wandb.log({'uniform_test_random_result':test_random_result})
 
 
 
@@ -157,19 +156,16 @@ def run_recbole(model=None, dataset=None, config_file_list=None, config_dict=Non
         
         model = get_model(config['model'])(config, train_data).to(config['device'])
         trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
-        trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
+        trainer.model.load_state_dict(uniform_soup)
         
-        print(config['eval_setting'])
+        print(config['eval_setting'],'-----------')
         test_popular_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
         
         logger.info(set_color('test popular result', 'yellow') + f': {test_popular_result}')
-        wandb.log({'test_popular_result':test_popular_result})
+        wandb.log({'uniform_test_popular_result':test_popular_result})
         
 
     return {
-        'best_valid_score': best_valid_score,
-        'valid_score_bigger': config['valid_metric_bigger'],
-        'best_valid_result': best_valid_result,
         'test_result': test_result
         }
 

@@ -280,7 +280,7 @@ class Trainer(AbstractTrainer):
 
         """
         resume_file = str(resume_file)
-        checkpoint = torch.load(resume_file)
+        checkpoint = torch.load(resume_file, map_location=self.device)
         self.start_epoch = checkpoint['epoch'] + 1
         self.cur_step = checkpoint['cur_step']
         self.best_valid_score = checkpoint['best_valid_score']
@@ -332,7 +332,6 @@ class Trainer(AbstractTrainer):
         """
         if saved and self.start_epoch >= self.epochs:
             self._save_checkpoint(-1)
-
         # self.align = []
         # self.uni = []
         for epoch_idx in range(self.start_epoch, self.epochs):
@@ -345,6 +344,11 @@ class Trainer(AbstractTrainer):
                 self._generate_train_loss_output(epoch_idx, training_start_time, training_end_time, train_loss)
             if verbose:
                 self.logger.info(train_loss_output)
+            
+            ## generating recipe for fisher merge
+            self.saved_model_file = os.path.join(self.config['log_dir'], self.config['model'], f'model_{epoch_idx}.pth')
+            self._save_checkpoint(epoch_idx)
+            ## generating recipe for fisher merge
 
             # eval
             if self.eval_step <= 0 or not valid_data:
@@ -366,8 +370,7 @@ class Trainer(AbstractTrainer):
                 )
                 wandb.log({'loss':train_loss,
                            'valid_score' : valid_score,
-                           'similarity_thres' : self.sim_thres,
-                           'AST' : self.model.AST_value})
+                           'similarity_thres' : self.sim_thres})
                 valid_end_time = time()
                 valid_score_output = (set_color("epoch %d evaluating", 'green') + " [" + set_color("time", 'blue')
                                     + ": %.2fs, " + set_color("valid_score", 'blue') + ": %f]") % \
