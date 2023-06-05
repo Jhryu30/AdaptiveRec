@@ -85,15 +85,11 @@ class CL4SRec(SequentialRecommender):
         self.mask_default = self.mask_correlated_samples(batch_size=self.batch_size)
         self.nce_fct = nn.CrossEntropyLoss()
 
-        self.AST = config['AST']
-        self.MONS = config['MONS']
-        self.k = config['k']
-        self.AST_value = 0
-
+        self.similarity_log = config['similarity_log']
         self.sim_log = []
         self.sim_noDA_log = []
-        self.similarity_log = {}
-        self.similarity_noDA_log = {}
+        self.similarity_log_dict = {}
+        self.similarity_noDA_log_dict = {}
 
         # parameters initialization
         self.apply(self._init_weights)
@@ -204,7 +200,7 @@ class CL4SRec(SequentialRecommender):
         output = self.gather_indexes(output, item_seq_len - 1)
         return output  # [B H]
 
-    def calculate_loss(self, interaction, sim_thres):
+    def calculate_loss(self, interaction, sim_thres, epoch_idx):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         seq_output = self.forward(item_seq, item_seq_len)
@@ -228,7 +224,8 @@ class CL4SRec(SequentialRecommender):
         seq_output1 = self.forward(aug_item_seq1, aug_len1)
         seq_output2 = self.forward(aug_item_seq2, aug_len2)
         
-        nce_logits, nce_labels = self.info_nce(seq_output1, seq_output2, temp=self.tau, batch_size=aug_len1.shape[0], sim=self.sim)
+        nce_logits, nce_labels = self.info_nce(seq_output1, seq_output2, sim_thres=sim_thres,
+                                                temp=self.tau, batch_size=aug_len1.shape[0], sim=self.sim, epoch_idx=epoch_idx)
         
         # nce_logits = torch.mm(seq_output1, seq_output2.T)
         # nce_labels = torch.tensor(list(range(nce_logits.shape[0])), dtype=torch.long, device=item_seq.device)
@@ -239,7 +236,7 @@ class CL4SRec(SequentialRecommender):
         
         nce_loss = self.nce_fct(nce_logits, nce_labels)
         
-        return loss + self.lmd * nce_loss, torch.tensor([sim_thres]) #, alignment, uniformity
+        return nce_loss , alignment, uniformity
 
     def decompose(self, z_i, z_j, origin_z, batch_size):
         """
@@ -277,7 +274,7 @@ class CL4SRec(SequentialRecommender):
             mask[batch_size + i, i] = 0
         return mask
     
-    def info_nce(self, z_i, z_j, temp, batch_size, sim='dot'):
+    def info_nce(self, z_i, z_j, temp, batch_size, sim='dot', epoch_idx=None):
         """
         We do not sample negative examples explicitly.
         Instead, given a positive pair, similar to (Chen et al., 2017), we treat the other 2(N − 1) augmented examples within a minibatch as negative examples.
@@ -302,21 +299,12 @@ class CL4SRec(SequentialRecommender):
         negative_samples = sim[mask].reshape(N, -1)
 
         # similarity log
-        similarity = negative_samples.clone().detach().view(-1)
-        similarity_noDA = negative_samples[:batch_size,:batch_size-1].clone().detach().view(-1)
-        self.sim_log.append(similarity)
-        self.sim_noDA_log.append(similarity_noDA)
+        if self.similarity_log_dict and ( epoch_idx % self.similarity_log == 0 ):
+            similarity = negative_samples.clone().detach().view(-1)
+            similarity_noDA = negative_samples[:batch_size,:batch_size-1].clone().detach().view(-1)
+            self.sim_log.append(similarity)
+            self.sim_noDA_log.append(similarity_noDA)
 
-        if self.MONS == 'upper' :
-            k = int(batch_size * self.k)
-            negative_samples, _ = torch.sort(negative_samples, descending=False)
-            negative_samples = negative_samples[:, 2*k:]
-        elif self.MONS == 'lower' :
-            k = int(batch_size * self.k)
-            negative_samples, _ = torch.sort(negative_samples, descending=False)
-            negative_samples = negative_samples[:, :2*k]
-
-    
         labels = torch.zeros(N).to(positive_samples.device).long()
         logits = torch.cat((positive_samples, negative_samples), dim=1)
         return logits, labels

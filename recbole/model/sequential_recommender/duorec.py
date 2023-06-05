@@ -85,15 +85,18 @@ class DuoRec(SequentialRecommender):
         self.sem_aug_nce_fct = nn.CrossEntropyLoss()
 
 
-        self.AST = config['AST']
-        self.MONS = config['MONS']
-        self.k = config['k']
-        self.AST_value = 0
+        # self.k_Learn = config['k_Learn']
+        # self.k_Stat = config['k_Stat']
+        # self.k = config['k']
+        # self.k_positive = config['k_positive']
 
+
+        # self.k_Learn_regularization_type = config['k_Learn_regularization_type']
+        self.similarity_log = config['similarity_log']
         self.sim_log = []
         self.sim_noDA_log = []
-        self.similarity_log = {}
-        self.similarity_noDA_log = {}
+        self.similarity_log_dict = {}
+        self.similarity_noDA_log_dict = {}
 
         
         # parameters initialization
@@ -167,7 +170,7 @@ class DuoRec(SequentialRecommender):
         output = self.gather_indexes(output, item_seq_len - 1)
         return output  # [B H]
 
-    def calculate_loss(self, interaction, sim_thres):
+    def calculate_loss(self, interaction, sim_thres, epoch_idx):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         seq_output = self.forward(item_seq, item_seq_len)
@@ -187,9 +190,9 @@ class DuoRec(SequentialRecommender):
         # Unsupervised NCE
         if self.ssl in ['us', 'un']:
             aug_seq_output = self.forward(item_seq, item_seq_len)
-            nce_logits, nce_labels = self.info_nce(seq_output, aug_seq_output, temp=self.tau,
-                                                   batch_size=item_seq_len.shape[0], sim=self.sim)
-
+            nce_logits, nce_labels, adaptive_sim_thres = self.info_nce(seq_output, aug_seq_output, sim_thres=sim_thres,
+                                                              temp=self.tau, batch_size=item_seq_len.shape[0], 
+                                                              sim=self.sim, epoch_idx=epoch_idx, k_positive=self.k_positive)
             # nce_logits = torch.mm(seq_output, aug_seq_output.T)
             # nce_labels = torch.tensor(list(range(nce_logits.shape[0])), dtype=torch.long, device=item_seq.device)
             
@@ -203,36 +206,39 @@ class DuoRec(SequentialRecommender):
         # Supervised NCE
         if self.ssl in ['us', 'su']:
             sem_aug, sem_aug_lengths = interaction['sem_aug'], interaction['sem_aug_lengths']
-            sem_aug_seq_output = self.forward(sem_aug, sem_aug_lengths)
+            sem_aug_seq_output, _ = self.forward(sem_aug, sem_aug_lengths)
 
-            sem_nce_logits, sem_nce_labels = self.info_nce(seq_output, sem_aug_seq_output, temp=self.tau,
-                                                           batch_size=item_seq_len.shape[0], sim=self.sim)
+            sem_nce_logits, sem_nce_labels, adaptive_sim_thres = self.info_nce(seq_output, sem_aug_seq_output, sim_thres=sim_thres,
+                                                                      temp=self.tau,batch_size=item_seq_len.shape[0], 
+                                                                      sim=self.sim, epoch_idx=epoch_idx, k_positive=self.k_positive)
             
             # sem_nce_logits = torch.mm(seq_output, sem_aug_seq_output.T) / self.tau
             # sem_nce_labels = torch.tensor(list(range(sem_nce_logits.shape[0])), dtype=torch.long, device=item_seq.device)
             
-            # with torch.no_grad():
-            #     alignment, uniformity = self.decompose(seq_output, sem_aug_seq_output, seq_output,
-            #                                            batch_size=item_seq_len.shape[0])
+            with torch.no_grad():
+                alignment, uniformity = self.decompose(seq_output, sem_aug_seq_output, seq_output,
+                                                       batch_size=item_seq_len.shape[0])
             
             loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
         
         if self.ssl == 'us_x':
-            aug_seq_output = self.forward(item_seq, item_seq_len)
+            aug_seq_output, _ = self.forward(item_seq, item_seq_len)
 
             sem_aug, sem_aug_lengths = interaction['sem_aug'], interaction['sem_aug_lengths']
-            sem_aug_seq_output = self.forward(sem_aug, sem_aug_lengths)
+            sem_aug_seq_output, _ = self.forward(sem_aug, sem_aug_lengths)
 
-            sem_nce_logits, sem_nce_labels = self.info_nce(aug_seq_output, sem_aug_seq_output, temp=self.tau,
-                                                           batch_size=item_seq_len.shape[0], sim=self.sim)
+            sem_nce_logits, sem_nce_labels, adaptive_sim_thres = self.info_nce(aug_seq_output, sem_aug_seq_output, sim_thres=sim_thres,
+                                                                      temp=self.tau, batch_size=item_seq_len.shape[0], 
+                                                                      sim=self.sim, epoch_idx=epoch_idx, k_positive=self.k_positive)
 
             loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
             
-            # with torch.no_grad():
-            #     alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
-            #                                            batch_size=item_seq_len.shape[0])
+            with torch.no_grad():
+                alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
+                                                       batch_size=item_seq_len.shape[0])
+            
 
-        return loss, torch.tensor([sim_thres])
+        return loss , adaptive_sim_thres, alignment, uniformity
 
     def mask_correlated_samples(self, batch_size):
         N = 2 * batch_size
@@ -243,7 +249,7 @@ class DuoRec(SequentialRecommender):
             mask[batch_size + i, i] = 0
         return mask
 
-    def info_nce(self, z_i, z_j, temp, batch_size, sim='dot'):
+    def info_nce(self, z_i, z_j, sim_thres, temp, batch_size, sim='dot', epoch_idx=None, k_positive=None):
         """
         We do not sample negative examples explicitly.
         Instead, given a positive pair, similar to (Chen et al., 2017), we treat the other 2(N − 1) augmented examples within a minibatch as negative examples.
@@ -273,14 +279,6 @@ class DuoRec(SequentialRecommender):
         self.sim_log.append(similarity)
         self.sim_noDA_log.append(similarity_noDA)
 
-        if self.MONS == 'upper' :
-            k = int(batch_size * self.k)
-            negative_samples, _ = torch.sort(negative_samples, descending=False)
-            negative_samples = negative_samples[:, 2*k:]
-        elif self.MONS == 'lower' :
-            k = int(batch_size * self.k)
-            negative_samples, _ = torch.sort(negative_samples, descending=False)
-            negative_samples = negative_samples[:, :2*k]
     
         labels = torch.zeros(N).to(positive_samples.device).long()
         logits = torch.cat((positive_samples, negative_samples), dim=1)
