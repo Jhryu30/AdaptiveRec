@@ -31,7 +31,7 @@ min_item_inter_num: 5
 #    timestamp: 1577714400
 
 # training settings
-epochs: 50 #训练的最大轮数
+epochs: 100 #训练的最大轮数
 train_batch_size: 256 #训练的batch_size
 learner: adam #使用的pytorch内置优化器
 learning_rate: 0.001 #学习率
@@ -46,12 +46,9 @@ eval_batch_size: 256 #评测的batch_size
 weight_decay: 0
 topk: [5, 10, 20, 50]
 
-# additional evaluation settings
-eval_uniform_setting : True
-eval_popular_setting : True
-
 # directory setting
-log_root: "./log/"
+# log_root: "./log/"
+log_root: "/data/jan4021/Duorec_code/"
 data_path: "./dataset/"
 
 lmd: 0.1
@@ -63,16 +60,33 @@ tau: 1
 contrast: 'us_x'
 
 # choose from {dot, cos}
-sim: 'dot'
+sim: 'cos'
 
 hidden_dropout_prob: 0.5
 attn_dropout_prob: 0.5
 
+gpu_id: 0
 cosine_lr_scheduler: true
-AST: false
-MONS: 'upper'  # 'lower'
-k: 0.1
+
+# k_Learn / k_Stat
+k_Learn: true                          # k_learn
+k_Learn_regularization_type : 0.9        # 'mean', 'median', float , null.  Regularizer as sim_thres   # k_learn_reg
+k_positive: true ## this is for positive setting for the pair having more similarity than sim_thres
+
+k_Stat: null  # 'lower', 'upper', 'null'    # k_stat
+k: null
+
+
+
+similarity_log : 5
+
+
+# resume_checkpoint_pth : '/data/jan4021/Duorec_code/AdaptiveRec/ml-1m/bs256-lmd0.1-sem0.1-un-May-31-2023_10-16-46-lr0.001-l20-tau1-cos-DPh0.5-DPa0.5/model.pth'
+
+# additional evaluation settings
+eval_uniform_setting : True
+eval_popular_setting : True
 
 # parameter merging option
-do_fisher_merging : true
-do_uniform_merging : true
+do_fisher_merging : false
+do_uniform_merging : false

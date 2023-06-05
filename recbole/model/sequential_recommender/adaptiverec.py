@@ -80,25 +80,36 @@ class AdaptiveRec(SequentialRecommender):
         self.ssl = config['contrast']
         self.tau = config['tau']
         self.sim = config['sim']
-        self.AST = config['AST']
-        self.MONS = config['MONS']
+        self.k_Learn = config['k_Learn']
+        self.k_Stat = config['k_Stat']
         self.k = config['k']
+        self.k_positive = config['k_positive']
         self.batch_size = config['train_batch_size']
         self.mask_default = self.mask_correlated_samples(batch_size=self.batch_size)
         self.aug_nce_fct = nn.CrossEntropyLoss()
         self.sem_aug_nce_fct = nn.CrossEntropyLoss()
         
-        if self.AST:
-            self.AST_layer = nn.Sequential(
-                        nn.Linear(self.hidden_size,  int(self.hidden_size/8)),
-                        nn.Linear(int(self.hidden_size/8), 1),
+        if self.k_Learn:
+            # way1
+            # self.k_Learn_layer = nn.Sequential(
+            #             nn.Linear(self.hidden_size,  int(self.hidden_size/8)),
+            #             nn.Linear(int(self.hidden_size/8), 1),
+            #             nn.Sigmoid()
+            #             )
+            
+            # way2 using .view(-1)
+            self.k_Learn_layer = nn.Sequential(
+                        nn.Linear(self.batch_size * self.hidden_size,  self.batch_size * int(self.hidden_size/8)),
+                        nn.Linear(self.batch_size * int(self.hidden_size/8), self.batch_size),
                         nn.Sigmoid()
                         )
+        self.k_Learn_regularization_type = config['k_Learn_regularization_type']
             
+        self.similarity_log = config['similarity_log']
         self.sim_log = []
         self.sim_noDA_log = []
-        self.similarity_log = {}
-        self.similarity_noDA_log = {}
+        self.similarity_log_dict = {}
+        self.similarity_noDA_log_dict = {}
 
         # parameters initialization
         self.apply(self._init_weights)
@@ -171,22 +182,30 @@ class AdaptiveRec(SequentialRecommender):
         # original output process
         output = self.gather_indexes(output, item_seq_len - 1)
 
-        # for AST=adaptive_similarity_threshold
-        if self.AST:
-            AST = self.AST_layer(output)
-            # AST = torch.mean(AST)       # batch안에서 mean으로 하지말고 각 seq마다 AST계산
-            AST = 2.1*(AST - 0.5)   # for make in [-1,1]    # 2.1은 sigmoid 떄문에 설정 원래는 2여야함
-            # print(f'AST={AST}')
-            self.AST_value = AST
+        # for k_Learn=adaptive_similarity_threshold
+        if self.k_Learn:
+            # self.k_Learn_value = self.k_Learn_layer(output)
+            # # self.k_Learn_value = torch.mean(self.k_Learn_value)       # batch안에서 mean으로 하지말고 각 seq마다 k_Learn 계산
+            # self.k_Learn_value = 2.1*(self.k_Learn_value - 0.5)   # for make in [-1,1]    # 2.1은 sigmoid 떄문에 설정 원래는 2여야함
+            # # print(f'self.k_Learn_value={self.k_Learn_value}')
+            # self.k_Learn_value = self.k_Learn_value    # [B 1]
+
+            if self.training:
+                self.k_Learn_value = self.k_Learn_layer(output.view(-1))
+                self.k_Learn_value = 2.1*(self.k_Learn_value - 0.5)   # for make in [-1,1]
+                self.k_Learn_value = self.k_Learn_value    # [B 1]
+
+            else:
+                self.k_Learn_value = None
         else:
-            AST = None
+            self.k_Learn_value = None
 
-        return output, AST      # [B H] , AST
+        return output, self.k_Learn_value      # [B H] , k_Learn
 
-    def calculate_loss(self, interaction, sim_thres):
+    def calculate_loss(self, interaction, sim_thres, epoch_idx):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
-        seq_output, AST = self.forward(item_seq, item_seq_len)
+        seq_output, k_Learn = self.forward(item_seq, item_seq_len)
         pos_items = interaction[self.POS_ITEM_ID]
         if self.loss_type == 'BPR':
             neg_items = interaction[self.NEG_ITEM_ID]
@@ -205,14 +224,14 @@ class AdaptiveRec(SequentialRecommender):
             aug_seq_output, _ = self.forward(item_seq, item_seq_len)
             nce_logits, nce_labels, adaptive_sim_thres = self.info_nce(seq_output, aug_seq_output, sim_thres=sim_thres,
                                                               temp=self.tau, batch_size=item_seq_len.shape[0], 
-                                                              sim=self.sim, AST=AST)
+                                                              sim=self.sim, epoch_idx=epoch_idx, k_Learn=k_Learn, k_positive=self.k_positive)
             # nce_logits = torch.mm(seq_output, aug_seq_output.T)
             # nce_labels = torch.tensor(list(range(nce_logits.shape[0])), dtype=torch.long, device=item_seq.device)
             
-            # if self.ssl == 'un':
-            #     with torch.no_grad():
-            #         alignment, uniformity = self.decompose(seq_output, aug_seq_output, seq_output,
-            #                                                batch_size=item_seq_len.shape[0])
+            if self.ssl == 'un':
+                with torch.no_grad():
+                    alignment, uniformity = self.decompose(seq_output, aug_seq_output, seq_output,
+                                                           batch_size=item_seq_len.shape[0])
                 
             loss += self.lmd * self.aug_nce_fct(nce_logits, nce_labels)
 
@@ -223,14 +242,14 @@ class AdaptiveRec(SequentialRecommender):
 
             sem_nce_logits, sem_nce_labels, adaptive_sim_thres = self.info_nce(seq_output, sem_aug_seq_output, sim_thres=sim_thres,
                                                                       temp=self.tau,batch_size=item_seq_len.shape[0], 
-                                                                      sim=self.sim, AST=AST)
+                                                                      sim=self.sim, epoch_idx=epoch_idx, k_Learn=k_Learn, k_positive=self.k_positive)
             
             # sem_nce_logits = torch.mm(seq_output, sem_aug_seq_output.T) / self.tau
             # sem_nce_labels = torch.tensor(list(range(sem_nce_logits.shape[0])), dtype=torch.long, device=item_seq.device)
             
-            # with torch.no_grad():
-            #     alignment, uniformity = self.decompose(seq_output, sem_aug_seq_output, seq_output,
-            #                                            batch_size=item_seq_len.shape[0])
+            with torch.no_grad():
+                alignment, uniformity = self.decompose(seq_output, sem_aug_seq_output, seq_output,
+                                                       batch_size=item_seq_len.shape[0])
             
             loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
         
@@ -242,18 +261,20 @@ class AdaptiveRec(SequentialRecommender):
 
             sem_nce_logits, sem_nce_labels, adaptive_sim_thres = self.info_nce(aug_seq_output, sem_aug_seq_output, sim_thres=sim_thres,
                                                                       temp=self.tau, batch_size=item_seq_len.shape[0], 
-                                                                      sim=self.sim, AST=AST)
+                                                                      sim=self.sim, epoch_idx=epoch_idx, k_Learn=k_Learn, k_positive=self.k_positive)
 
             loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
             
-            # with torch.no_grad():
-            #     alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
-            #                                            batch_size=item_seq_len.shape[0])
+            with torch.no_grad():
+                alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
+                                                       batch_size=item_seq_len.shape[0])
             
-        if self.AST : 
-            loss = loss + 0.1*torch.norm(AST-sim_thres, p=2)
+        # k_Leran 를 위한 regularization을 할꺼면 넣어라
+        # .yaml mean/meadian/float
+        if self.k_Learn_regularization_type and epoch_idx >= 1 :
+            loss = loss + 0.1*torch.norm(k_Learn-sim_thres, p=2)
 
-        return loss , adaptive_sim_thres
+        return loss , adaptive_sim_thres, alignment, uniformity
 
     def ClampMax(self, x, val):
         """
@@ -273,7 +294,7 @@ class AdaptiveRec(SequentialRecommender):
         return mask
     
 
-    def info_nce(self, z_i, z_j, sim_thres, temp, batch_size, sim='dot', AST=None):
+    def info_nce(self, z_i, z_j, sim_thres, temp, batch_size, sim='dot', epoch_idx=None, k_Learn=None, k_positive=None):
         """
         We do not sample negative examples explicitly.
         Instead, given a positive pair, similar to (Chen et al., 2017), we treat the other 2(N − 1) augmented examples within a minibatch as negative examples.
@@ -298,33 +319,63 @@ class AdaptiveRec(SequentialRecommender):
         negative_samples = sim[mask].reshape(N, -1)
 
         # similarity log
-        similarity = negative_samples.clone().detach().view(-1)
-        similarity_noDA = negative_samples[:batch_size,:batch_size-1].clone().detach().view(-1)
-        self.sim_log.append(similarity)
-        self.sim_noDA_log.append(similarity_noDA)
+        if self.similarity_log_dict and ( epoch_idx % self.similarity_log == 0 ):
+            similarity = negative_samples.clone().detach().view(-1)
+            similarity_noDA = negative_samples[:batch_size,:batch_size-1].clone().detach().view(-1)
+            self.sim_log.append(similarity)
+            self.sim_noDA_log.append(similarity_noDA)
 
         
-        # similarity log
+        # regularization for k_Learn
         similarity = negative_samples.view(-1)
-        adaptive_sim_thres = similarity.mean()
+        if self.k_Learn_regularization_type == 'mean':
+            adaptive_sim_thres = similarity.mean()
+        elif self.k_Learn_regularization_type == 'median':
+            adaptive_sim_thres = similarity.median()
+        elif type(self.k_Learn_regularization_type) == float :
+            sorted, _ = torch.sort(similarity)
+            k = int(similarity.size()[0] * self.k_Learn_regularization_type)
+            adaptive_sim_thres = sorted[k]               # for next epoch k_Learn
+        elif self.k_Learn_regularization_type == None :
+            adaptive_sim_thres = torch.tensor(0)  # Not gonna use it. Just set it as zero
 
-        # if sim_thres != 0:
-        #     negative_samples[negative_samples>sim_thres] = -1e9
 
+        labels = torch.zeros(N).to(positive_samples.device).long()
 
-        if AST != None:
-            replace_value = -1e9
-            AST = torch.concat([AST,AST])
-            negative_samples = (torch.nn.ReLU()(negative_samples-AST) * replace_value) + negative_samples    # 곱셈을 이용하여 -1e9에 가까운값으로 밀어버림
+        if k_Learn != None:
+            k_Learn = torch.concat([k_Learn,k_Learn])
 
-            # negative_samples = self.ClampMax(negative_samples, AST) # 0.8 이상의 값을 0.8로 밀어버림
-            # negative_samples[negative_samples>=AST] = replace_value
-            # negative_samples[negative_samples>AST] = -1e9
-            # -torch.nn.Threshold(-thr,-val)(-A)
-            # negative_samples = -torch.nn.Threshold(-AST.item(),-replace_value)(-negative_samples)
+            # push negative, pull positive
+            if k_positive and ( epoch_idx >= 0 ):
+            # if k_positive:
+                positive_samples_label = torch.ones(N,1).to(positive_samples.device)
+                labels = list(torch.zeros_like(negative_samples).unbind()) # now this is a tensor of length=0-dim
+                for i in range(len(labels)):
+                    labels[i][negative_samples[i] >= k_Learn[i]] = 1  # For each row, bigger vals than k_learn[i] are replaced as 1
+                    labels[i] /= torch.sum(labels[i]) or 1                 # divided cause labels should be probability ( sum=1 )
+                labels = torch.stack(labels)
+
+                # DB
+                # labels = torch.zeros_like(negative_samples)
+                labels = torch.cat([positive_samples_label,labels],dim=1) / 2
+
+            # just push negative pairs
+            else:
+                replace_value = -1e9
+                negative_samples = (torch.nn.ReLU()(negative_samples-k_Learn.unsqueeze(1)) * replace_value) + negative_samples    # 곱셈을 이용하여 -1e9에 가까운값으로 밀어버림
+        
+
+        if self.k_Stat:
+            if self.k_Stat == 'upper' :
+                k = int(batch_size * self.k)
+                negative_samples, _ = torch.sort(negative_samples, descending=False)
+                negative_samples = negative_samples[:, 2*k:]
+            elif self.k_Stat == 'lower' :
+                k = int(batch_size * self.k)
+                negative_samples, _ = torch.sort(negative_samples, descending=False)
+                negative_samples = negative_samples[:, :2*k]
 
     
-        labels = torch.zeros(N).to(positive_samples.device).long()
         logits = torch.cat((positive_samples, negative_samples), dim=1)
         return logits, labels, adaptive_sim_thres
 

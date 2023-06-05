@@ -200,3 +200,92 @@ def objective_function(config_dict=None, config_file_list=None, saved=True):
         'best_valid_result': best_valid_result,
         'test_result': test_result
     }
+
+def run_resume(log_dir, model=None, dataset=None, config_file_list=None, config_dict=None, saved=True):
+    r""" A fast running api, which includes the complete process of
+    training and testing a model on a specified dataset
+
+    Args:
+        model (str): model name
+        dataset (str): dataset name
+        config_file_list (list): config files used to modify experiment parameters
+        config_dict (dict): parameters dictionary used to modify experiment parameters
+        saved (bool): whether to save the model
+    """
+    import os
+    # configurations initialization
+    config = Config(model=model, dataset=dataset, config_file_list=config_file_list, config_dict=config_dict)
+    wandb.init(project='AdaptiveRec', 
+            name=config.model+config['contrast']+config['eval_setting'].split(',')[1],
+            config=config, mode='disabled')
+    # init_seed(config['seed'], config['reproducibility'])
+    
+    config['log_dir'] = log_dir
+
+    wandb.config.update({'log_dir':log_dir})
+    
+    # dataset filtering
+    dataset = create_dataset(config)
+    
+    # dataset splitting
+    train_data, valid_data, test_data = data_preparation(config, dataset)
+
+    # model loading and initialization
+    model = get_model(config['model'])(config, train_data).to(config['device'])
+    
+    # trainer loading and initialization
+    trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
+
+    # # model training
+    # best_valid_score, best_valid_result = trainer.fit(
+    #     train_data, valid_data, saved=saved, show_progress=config['show_progress']
+    # )
+    
+    trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
+    
+    
+    # model evaluation
+    print(config['eval_setting'])
+    test_result = trainer.evaluate(test_data, load_best_model=saved, show_progress=config['show_progress'])
+    print(test_result)
+    wandb.log({'test_result' : test_result})
+    
+    
+    
+    # random setting (uni100)
+    if config['eval_uniform_setting'] == True:
+        config['eval_setting'] = 'TO_LS,uni100' 
+        dataset = create_dataset(config)
+        train_data, valid_data, test_data = data_preparation(config, dataset)
+        
+        model = get_model(config['model'])(config, train_data).to(config['device'])
+        trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
+        trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
+        
+        print(config['eval_setting'])
+        test_random_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
+        print(test_random_result)
+        wandb.log({'test_random_result':test_random_result})
+
+
+
+    # popular setting (pop100)
+    if config['eval_popular_setting'] == True:
+        config['eval_setting'] = 'TO_LS,pop100' 
+        dataset = create_dataset(config)
+        train_data, valid_data, test_data = data_preparation(config, dataset)
+        
+        model = get_model(config['model'])(config, train_data).to(config['device'])
+        trainer = get_trainer(config['MODEL_TYPE'], config['model'])(config, model)
+        trainer.resume_checkpoint(resume_file=os.path.join(config['log_dir'], 'model.pth'))
+        
+        print(config['eval_setting'])
+        test_popular_result = trainer.evaluate(test_data, load_best_model=False, show_progress=config['show_progress'])
+        print(test_popular_result)
+        wandb.log({'test_popular_result':test_popular_result})
+        
+
+    return {
+        'valid_score_bigger': config['valid_metric_bigger'],
+        'test_result': test_result
+        }
