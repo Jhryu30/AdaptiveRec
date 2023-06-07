@@ -198,12 +198,12 @@ class CL4SRec(SequentialRecommender):
         trm_output = self.trm_encoder(input_emb, extended_attention_mask, output_all_encoded_layers=True)
         output = trm_output[-1]
         output = self.gather_indexes(output, item_seq_len - 1)
-        return output  # [B H]
+        return output, None  # [B H]
 
     def calculate_loss(self, interaction, sim_thres, epoch_idx):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
-        seq_output = self.forward(item_seq, item_seq_len)
+        seq_output, _ = self.forward(item_seq, item_seq_len)
         pos_items = interaction[self.POS_ITEM_ID]
         if self.loss_type == 'BPR':
             neg_items = interaction[self.NEG_ITEM_ID]
@@ -221,8 +221,8 @@ class CL4SRec(SequentialRecommender):
         # aug_item_seq1, aug_len1, aug_item_seq2, aug_len2 = self.augment(item_seq, item_seq_len)
         aug_item_seq1, aug_len1, aug_item_seq2, aug_len2 = \
             interaction['aug1'], interaction['aug_len1'], interaction['aug2'], interaction['aug_len2']
-        seq_output1 = self.forward(aug_item_seq1, aug_len1)
-        seq_output2 = self.forward(aug_item_seq2, aug_len2)
+        seq_output1, _ = self.forward(aug_item_seq1, aug_len1)
+        seq_output2, _ = self.forward(aug_item_seq2, aug_len2)
         
         nce_logits, nce_labels = self.info_nce(seq_output1, seq_output2, sim_thres=sim_thres,
                                                 temp=self.tau, batch_size=aug_len1.shape[0], sim=self.sim, epoch_idx=epoch_idx)
@@ -236,7 +236,7 @@ class CL4SRec(SequentialRecommender):
         
         nce_loss = self.nce_fct(nce_logits, nce_labels)
         
-        return nce_loss , alignment, uniformity
+        return nce_loss, None, alignment, uniformity
 
     def decompose(self, z_i, z_j, origin_z, batch_size):
         """
@@ -274,7 +274,7 @@ class CL4SRec(SequentialRecommender):
             mask[batch_size + i, i] = 0
         return mask
     
-    def info_nce(self, z_i, z_j, temp, batch_size, sim='dot', epoch_idx=None):
+    def info_nce(self, z_i, z_j, sim_thres, temp, batch_size, sim='dot', epoch_idx=None):
         """
         We do not sample negative examples explicitly.
         Instead, given a positive pair, similar to (Chen et al., 2017), we treat the other 2(N − 1) augmented examples within a minibatch as negative examples.
@@ -313,7 +313,7 @@ class CL4SRec(SequentialRecommender):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         test_item = interaction[self.ITEM_ID]
-        seq_output = self.forward(item_seq, item_seq_len)
+        seq_output, _ = self.forward(item_seq, item_seq_len)
         test_item_emb = self.item_embedding(test_item)
         scores = torch.mul(seq_output, test_item_emb).sum(dim=1)  # [B]
         return scores
@@ -321,7 +321,7 @@ class CL4SRec(SequentialRecommender):
     def full_sort_predict(self, interaction):
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
-        seq_output = self.forward(item_seq, item_seq_len)
+        seq_output, _ = self.forward(item_seq, item_seq_len)
         test_items_emb = self.item_embedding.weight[:self.n_items]  # unpad the augmentation mask
         scores = torch.matmul(seq_output, test_items_emb.transpose(0, 1))  # [B n_items]
         return scores

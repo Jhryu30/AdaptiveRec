@@ -214,7 +214,9 @@ class Trainer(AbstractTrainer):
                 total_loss = losses.item() if total_loss is None else total_loss + losses.item()
             self._check_nan(loss)
             loss.backward()
-            sim_thres_epoch.append(sim_thres_batch.item())
+
+            if sim_thres_batch:
+                sim_thres_epoch.append(sim_thres_batch.item())
             
             if self.clip_grad_norm:
                 clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
@@ -224,7 +226,8 @@ class Trainer(AbstractTrainer):
 
         self.align.append(np.mean(ave_align))
         self.uni.append(np.mean(ave_uni))
-        self.sim_thres = np.mean(sim_thres_epoch)
+        if sim_thres_batch:
+            self.sim_thres = np.mean(sim_thres_epoch)
 
 
         # save similarity
@@ -378,13 +381,21 @@ class Trainer(AbstractTrainer):
                     max_step=self.stopping_step,
                     bigger=self.valid_metric_bigger
                 )
-                wandb.log({'loss':train_loss,
-                           'valid_score' : valid_score,
-                           'similarity_thres' : self.sim_thres,
-                           'k_Learn' : self.model.k_Learn_value,
-                           'alignment' : self.align[-1],
-                           'uniformity' : self.uni[-1] 
-                           })
+                if self.config['model'] == 'AdaptiveRec':
+                    wandb.log({'loss':train_loss,
+                            'valid_score' : valid_score,
+                            'similarity_thres' : self.sim_thres,
+                            'k_Learn' : self.model.k_Learn_value,
+                            'alignment' : self.align[-1],
+                            'uniformity' : self.uni[-1] 
+                            })
+                else:
+                    wandb.log({'loss':train_loss,
+                            'valid_score' : valid_score,
+                            'similarity_thres' : self.sim_thres,
+                            'alignment' : self.align[-1],
+                            'uniformity' : self.uni[-1] 
+                            })
                 valid_end_time = time()
                 valid_score_output = (set_color("epoch %d evaluating", 'green') + " [" + set_color("time", 'blue')
                                     + ": %.2fs, " + set_color("valid_score", 'blue') + ": %f]") % \
