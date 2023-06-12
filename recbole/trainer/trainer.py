@@ -27,6 +27,7 @@ import numpy as np
 import torch
 import pickle
 import torch.optim as optim
+import torch.cuda.amp as amp
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from tqdm import tqdm
 from timm.scheduler.cosine_lr import CosineLRScheduler
@@ -94,6 +95,7 @@ class Trainer(AbstractTrainer):
         self.clip_grad_norm = config['clip_grad_norm']
         self.valid_metric = config['valid_metric'].lower()
         self.valid_metric_bigger = config['valid_metric_bigger']
+        self.train_batch_size = config['train_batch_size']
         self.test_batch_size = config['eval_batch_size']
         # self.device = config['device']
         self.device = torch.device('cuda:'+str(config['gpu_id']))
@@ -135,6 +137,7 @@ class Trainer(AbstractTrainer):
         self.model = self.model.to(self.device)
         self.similarity_log = config['similarity_log']
         self.resume_checkpoint_pth = config['resume_checkpoint_pth']
+        self.AMP = config['AMP']
 
     def _build_optimizer(self, params):
         r"""Init the Optimizer
@@ -196,33 +199,64 @@ class Trainer(AbstractTrainer):
         )
         ave_align = []
         ave_uni = []
+        sim_thres_batch = None  # for not make error in cl4srec, duorec
+        if self.AMP :
+            scaler = amp.GradScaler()   # for AMP
         for batch_idx, interaction in iter_data:
             # this is because of the k_Learn_layer at adaptiverec
-            if interaction[self.model.ITEM_SEQ].size()[0] != self.test_batch_size :
+            if interaction[self.model.ITEM_SEQ].size()[0] != self.train_batch_size :
                 continue
             interaction = interaction.to(self.device)
             self.optimizer.zero_grad()
-            losses, sim_thres_batch, alignment, uniformity = loss_func(interaction, self.sim_thres, epoch_idx)
-            ave_align.append(alignment.item())
-            ave_uni.append(uniformity.item())
-            if isinstance(losses, tuple):
-                loss = sum(losses)
-                loss_tuple = tuple(per_loss.item() for per_loss in losses)
-                total_loss = loss_tuple if total_loss is None else tuple(map(sum, zip(total_loss, loss_tuple)))
+
+            if self.AMP:
+                with amp.autocast():
+                    losses, sim_thres_batch, alignment, uniformity = loss_func(interaction, self.sim_thres, epoch_idx)
+                    ave_align.append(alignment.item())
+                    ave_uni.append(uniformity.item())
+                    if isinstance(losses, tuple):
+                        loss = sum(losses)
+                        loss_tuple = tuple(per_loss.item() for per_loss in losses)
+                        total_loss = loss_tuple if total_loss is None else tuple(map(sum, zip(total_loss, loss_tuple)))
+                    else:
+                        loss = losses
+                        total_loss = losses.item() if total_loss is None else total_loss + losses.item()
+                self._check_nan(loss)
+
+                scaler.scale(loss).backward()
+                if self.clip_grad_norm:
+                    clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
+                scaler.step(self.optimizer)
+                scaler.update()
+                if self.cosine_lr_scheduler :
+                    self.lr_scheduler.step_update(epoch_idx)
+
+            # NO AMP
             else:
-                loss = losses
-                total_loss = losses.item() if total_loss is None else total_loss + losses.item()
-            self._check_nan(loss)
-            loss.backward()
+                losses, sim_thres_batch, alignment, uniformity = loss_func(interaction, self.sim_thres, epoch_idx)
+                ave_align.append(alignment.item())
+                ave_uni.append(uniformity.item())
+                if isinstance(losses, tuple):
+                    loss = sum(losses)
+                    loss_tuple = tuple(per_loss.item() for per_loss in losses)
+                    total_loss = loss_tuple if total_loss is None else tuple(map(sum, zip(total_loss, loss_tuple)))
+                else:
+                    loss = losses
+                    total_loss = losses.item() if total_loss is None else total_loss + losses.item()
+                self._check_nan(loss)
+
+
+                loss.backward()
+                if self.clip_grad_norm:
+                    clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
+                self.optimizer.step()
+                if self.cosine_lr_scheduler :
+                    self.lr_scheduler.step_update(epoch_idx)
 
             if sim_thres_batch:
                 sim_thres_epoch.append(sim_thres_batch.item())
             
-            if self.clip_grad_norm:
-                clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
-            self.optimizer.step()
-            if self.cosine_lr_scheduler :
-                self.lr_scheduler.step_update(epoch_idx)
+                
 
         self.align.append(np.mean(ave_align))
         self.uni.append(np.mean(ave_uni))

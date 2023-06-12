@@ -84,6 +84,7 @@ class AdaptiveRec(SequentialRecommender):
         self.k_Stat = config['k_Stat']
         self.k = config['k']
         self.k_positive = config['k_positive']
+        self.incremental_clloss = config['incremental_clloss']
         self.batch_size = config['train_batch_size']
         self.mask_default = self.mask_correlated_samples(batch_size=self.batch_size)
         self.aug_nce_fct = nn.CrossEntropyLoss()
@@ -233,7 +234,11 @@ class AdaptiveRec(SequentialRecommender):
                     alignment, uniformity = self.decompose(seq_output, aug_seq_output, seq_output,
                                                            batch_size=item_seq_len.shape[0])
                 
-            loss += self.lmd * self.aug_nce_fct(nce_logits, nce_labels)
+            if self.incremental_clloss:
+                coeff = min(1, 0.1 * epoch_idx)
+            else:
+                coeff = 1
+            loss += coeff * self.lmd * self.aug_nce_fct(nce_logits, nce_labels)
 
         # Supervised NCE
         if self.ssl in ['us', 'su']:
@@ -251,7 +256,11 @@ class AdaptiveRec(SequentialRecommender):
                 alignment, uniformity = self.decompose(seq_output, sem_aug_seq_output, seq_output,
                                                        batch_size=item_seq_len.shape[0])
             
-            loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
+            if self.incremental_clloss:
+                coeff = min(1, 0.1 * epoch_idx)
+            else:
+                coeff = 1
+            loss += coeff * self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
         
         if self.ssl == 'us_x':
             aug_seq_output, _ = self.forward(item_seq, item_seq_len)
@@ -263,7 +272,11 @@ class AdaptiveRec(SequentialRecommender):
                                                                       temp=self.tau, batch_size=item_seq_len.shape[0], 
                                                                       sim=self.sim, epoch_idx=epoch_idx, k_Learn=k_Learn, k_positive=self.k_positive)
 
-            loss += self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
+            if self.incremental_clloss:
+                coeff = min(1, 0.1 * epoch_idx)
+            else:
+                coeff = 1
+            loss += coeff * self.lmd_sem * self.aug_nce_fct(sem_nce_logits, sem_nce_labels)
             
             with torch.no_grad():
                 alignment, uniformity = self.decompose(aug_seq_output, sem_aug_seq_output, seq_output,
