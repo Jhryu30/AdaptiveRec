@@ -64,3 +64,20 @@ wandb/run-20230524_123944-32con9vc/files/wandb-metadata.json
 wandb/run-20230524_123944-32con9vc/files/wandb-summary.json
 wandb/run-20230524_123944-32con9vc/logs/debug-internal.log
 wandb/run-20230524_123944-32con9vc/logs/debug.log
+
+
+
+
+# my ignore list
+wandb/
+log/
+__pycache__
+
+dataset/amazon_beauty
+dataset/ml-1m
+dataset/ml-20m
+dataset/yelp2022
+
+zzz.ipynb
+zzz.sh
+Experiments.txt

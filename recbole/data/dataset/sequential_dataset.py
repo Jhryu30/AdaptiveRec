@@ -15,6 +15,7 @@ recbole.data.sequential_dataset
 import copy
 
 import numpy as np
+from tqdm import tqdm
 
 from recbole.data.dataset import Dataset
 
@@ -95,7 +96,7 @@ class SequentialDataset(Dataset):
         else:
             same_target_index = []
             target_item = self.inter_feat['item_id'][target_index].numpy()
-            for index, item_id in enumerate(target_item):
+            for index, item_id in enumerate(tqdm(target_item)):
                 all_index_same_id = np.where(target_item == item_id)[0]  # all index of a specific item id with self item
                 delete_index = np.argwhere(all_index_same_id == index)
                 all_index_same_id_wo_self = np.delete(all_index_same_id, delete_index)
