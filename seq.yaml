@@ -47,13 +47,11 @@ weight_decay: 0
 topk: [5, 10, 20, 50]
 
 # directory setting
-# log_root: "./log/"
-log_root: "/data/jan4021/Duorec_code/"
-data_path: "./dataset/"
+log_root: "./log/"
+data_path: "./dataset/"   # check the README.md
 
 lmd: 0.1
 lmd_sem: 0.1
-
 tau: 1
 
 # choose from {un, su, us, us_x}
@@ -69,9 +67,9 @@ gpu_id: 0
 cosine_lr_scheduler: true
 
 # k_Learn / k_Stat
-k_Learn: true                          # k_learn
-k_Learn_regularization_type : 0.9        # 'mean', 'median', float , null.  Regularizer as sim_thres   # k_learn_reg
-k_positive: true ## this is for positive setting for the pair having more similarity than sim_thres
+k_Learn: true                           # k_learn
+k_Learn_regularization_type : 0.9       # 'mean', 'median', float , null.  Regularizer as sim_thres   # k_learn_reg
+k_positive: true                        # this is for positive setting for the pair having more similarity than sim_thres
 incremental_clloss: null
 
 k_Stat: null  # 'lower', 'upper', 'null'    # k_stat
@@ -79,8 +77,8 @@ k: null
 
 
 # wandb
-entity: 'jan4021'
-project: 'NakTa_AdaptiveRec'
+entity: 'your_entity'
+project: 'AdaptiveRec'
 name: 'AdaptiveRec'
 
 
@@ -88,8 +86,7 @@ name: 'AdaptiveRec'
 similarity_log : null
 AMP: null
 
-
-# resume_checkpoint_pth : '/data/jan4021/Duorec_code/AdaptiveRec/ml-1m/bs256-lmd0.1-sem0.1-un-May-31-2023_10-16-46-lr0.001-l20-tau1-cos-DPh0.5-DPa0.5/model.pth'
+# resume_checkpoint_pth : 'path/to/your.pth'
 
 # additional evaluation settings
 eval_uniform_setting : True
