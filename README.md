@@ -1,10 +1,12 @@
 #  AdaptiveRec & Fisher-weighted Merge of Sequential RecSys
 
-This repository contains two main codes; AdaptiveRec & Fisher-weighted Merge of Sequential Recommendation System.  
+This repository contains two main codes; **AdaptiveRec** & **Fisher-weighted Merge of Sequential Recommendation System**.  
 
-Code for [AdaptiveRec: Adaptively Construct Pairs for Contrastive Learning in Sequential Recommendation](https://arxiv.org/abs/2307.05469), accepted in 'The Many Facets of Preference-based Learning' the Workshop at the ICML 2023.  
+Both papers are accepted in 'The Many Facets of Preference-based Learning' the Workshop at the ICML 2023.  
 
-Code for [Fisher-Weighted Merge of Contrastive Learning Models in Sequential Recommendation](https://arxiv.org/abs/2307.05476), accepted in 'The Many Facets of Preference-based Learning' the Workshop at the ICML 2023.  
+Code for [AdaptiveRec: Adaptively Construct Pairs for Contrastive Learning in Sequential Recommendation](https://arxiv.org/abs/2307.05469).
+
+Code for [Fisher-Weighted Merge of Contrastive Learning Models in Sequential Recommendation](https://arxiv.org/abs/2307.05476).
 
 # Dataset Preparation
 
@@ -35,15 +37,20 @@ $ tree
 
 ```
 
-Run `duorec.sh`.
 
-# Reproduce
+# Reproduce AdaptiveRec
 
-If you want to reproduce AdaptiveRec and the previous works such as DuoRec and CL4SRec, please run 'reproduce.sh' file.
+If you want to reproduce AdaptiveRec and the previous works such as DuoRec and CL4SRec, please run `reproduce.sh`.
 
 For more information of previous work, 
-- WSDM 2022 paper, [Contrastive Learning for Representation Degeneration Problem in Sequential Recommendation](https://arxiv.org/abs/2110.05730).
-- WWW 2022 paper, [Contrastive Learning for Sequential Recommendation](https://arxiv.org/abs/2010.14395)
+- [Contrastive Learning for Representation Degeneration Problem in Sequential Recommendation](https://arxiv.org/abs/2110.05730) (accepted in WSDM 2022)
+- [Contrastive Learning for Sequential Recommendation](https://arxiv.org/abs/2010.14395) (accepted in WWW 2022)
+
+# Reproduce Fisher-weighted Merge of Sequential RecSys
+
+In order to ensemble models, obtain learned parameters through reproducing previous models such as DuoRec, CL4SRec, and AdaptiveRec.
+Run `run_model_soup.py`.
+
 
 # Wandb
 
@@ -55,4 +62,4 @@ name: ~
 ```
 
 # Credit
-This repo is based on [RecBole](https://github.com/RUCAIBox/RecBole).
+This repo is based on [RecBole](https://github.com/RUCAIBox/RecBole), [DuoRec](https://github.com/RuihongQiu/DuoRec) and [ModelSoup](https://github.com/mlfoundations/model-soups).
