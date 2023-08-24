@@ -1,8 +1,6 @@
 #  AdaptiveRec & Fisher-weighted Merge of Sequential RecSys
 
-This repository contains two main codes; **AdaptiveRec** & **Fisher-weighted Merge of Sequential Recommendation System**.  
-
-Both papers are accepted in 'The Many Facets of Preference-based Learning' the Workshop at the ICML 2023.  
+This repository contains two main codes; **AdaptiveRec** & **Fisher-weighted Merge of Sequential Recommendation System**. Both papers are accepted in 'The Many Facets of Preference-based Learning' the Workshop at the ICML 2023.  
 
 Code for [AdaptiveRec: Adaptively Construct Pairs for Contrastive Learning in Sequential Recommendation](https://arxiv.org/abs/2307.05469).
 
