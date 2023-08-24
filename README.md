@@ -1,7 +1,10 @@
-# DuoRec
-Code for WSDM 2022 paper, [Contrastive Learning for Representation Degeneration Problem in Sequential Recommendation](https://arxiv.org/abs/2110.05730).
+#  AdaptiveRec & Fisher-weighted Merge of Sequential RecSys
 
-# Usage
+This repository contains two main codes; AdaptiveRec & Fisher-weighted Merge of Sequential Recommendation System.
+Code for [AdaptiveRec: Adaptively Construct Pairs for Contrastive Learning in Sequential Recommendation](https://arxiv.org/abs/2307.05469), accepted in 'The Many Facets of Preference-based Learning' the Workshop at the ICML 2023.
+Code for [Fisher-Weighted Merge of Contrastive Learning Models in Sequential Recommendation](https://arxiv.org/abs/2307.05476), accepted in 'The Many Facets of Preference-based Learning' the Workshop at the ICML 2023.
+
+# Dataset Preparation
 
 Download datasets from [RecSysDatasets](https://github.com/RUCAIBox/RecSysDatasets) or their [Google Drive](https://drive.google.com/drive/folders/1ahiLmzU7cGRPXf5qGMqtAChte2eYp9gI). And put the files in `./dataset/` like the following.
 
@@ -36,6 +39,10 @@ Run `duorec.sh`.
 
 If you want to reproduce AdaptiveRec and the previous works such as DuoRec and CL4SRec, please run 'reproduce.sh' file.
 
+For more information of previous work, 
+- WSDM 2022 paper, [Contrastive Learning for Representation Degeneration Problem in Sequential Recommendation](https://arxiv.org/abs/2110.05730).
+- WWW 2022 paper, [Contrastive Learning for Sequential Recommendation](https://arxiv.org/abs/2010.14395)
+
 # Wandb
 
 If you want to use wandb, writedown your wandb accounts at seq.yaml file.
@@ -44,28 +51,6 @@ entity: your_entity
 project: ~
 name: ~
 ```
-
-# Cite
-
-If you find this repo useful, please cite
-```
-@article{DuoRec,
-  author    = {Ruihong Qiu and
-               Zi Huang and
-               Hongzhi Yin and
-               Zijian Wang},
-  title     = {Contrastive Learning for Representation Degeneration Problem in Sequential Recommendation},
-  journal   = {CoRR},
-  volume    = {abs/2110.05730},
-  year      = {2021},
-}
-```
-
-# MISC
-
-We have also implemented `CL4SRec`, [Contrastive Learning for Sequential Recommendation](https://arxiv.org/abs/2010.14395). Change the `--model="DuoRec"` into `--model="CL4SRec"` in the `duorec.sh` file to run `CL4SRec`.
-
-Our another sequential recommender model `MMInfoRec`, [Memory Augmented Multi-Instance Contrastive Predictive Coding for Sequential Recommendation](https://arxiv.org/abs/2109.00368) at ICDM 2021 is also available on GitHub, [MMInfoRec](https://github.com/RuihongQiu/MMInfoRec).
 
 # Credit
 This repo is based on [RecBole](https://github.com/RUCAIBox/RecBole).
