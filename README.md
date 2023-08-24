@@ -32,6 +32,19 @@ $ tree
 
 Run `duorec.sh`.
 
+# Reproduce
+
+If you want to reproduce AdaptiveRec and the previous works such as DuoRec and CL4SRec, please run 'reproduce.sh' file.
+
+# Wandb
+
+If you want to use wandb, writedown your wandb accounts at seq.yaml file.
+```
+entity: your_entity
+project: ~
+name: ~
+```
+
 # Cite
 
 If you find this repo useful, please cite
