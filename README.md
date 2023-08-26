@@ -57,7 +57,7 @@ Run `run_model_soup.py`.
 - `run_finetune.py` : finetune base model with contrastive losses added.
 
 3. Merge Recipe Models
-- `run_fisher.py`
+- `run_fisher.py` : uniform-merge and Fiser-merge models.
 
 # Track your hyperparameters with WandB
 
