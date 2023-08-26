@@ -49,8 +49,17 @@ For more information of previous work,
 In order to ensemble models, obtain learned parameters through reproducing previous models such as DuoRec, CL4SRec, and AdaptiveRec.
 Run `run_model_soup.py`.
 
+1. Model Recipe Preparation
+- `run_seq.py` : train and test models with RecBole. (`run_test.py` : test only)
 
-# Wandb
+2. Specific Recipe Preparation
+- `run_finetune_basline.py` : train a base model for shared initialization of recipe models.
+- `run_finetune.py` : finetune base model with contrastive losses added.
+
+3. Merge Recipe Models
+- `run_fisher.py`
+
+# Track your hyperparameters with WandB
 
 If you want to use wandb, writedown your wandb accounts at seq.yaml file.
 ```
