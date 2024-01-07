@@ -67,6 +67,9 @@ entity: your_entity
 project: ~
 name: ~
 ```
+# Presented Posters
+Our posters are uploaded in `posters/`
+
 
 # Credit
 This repo is based on [RecBole](https://github.com/RUCAIBox/RecBole), [DuoRec](https://github.com/RuihongQiu/DuoRec) and [ModelSoup](https://github.com/mlfoundations/model-soups).
